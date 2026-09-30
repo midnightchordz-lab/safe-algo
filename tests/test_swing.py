@@ -78,7 +78,7 @@ class SizingTests(unittest.TestCase):
 
 class GuardrailTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = SwingConfig()
+        self.cfg = replace(SwingConfig(), entry="breakout")  # test data is breakout-shaped
 
     def test_three_to_one_levels(self):
         ind = compute(uptrend())
