@@ -43,6 +43,17 @@ def run(series, cfg, verbose=False):
             "halt_reason": state["halt_reason"]}
 
 
+def buy_and_hold(series, cfg):
+    """Benchmark: split the budget equally on the first tradable day and never sell."""
+    start = cfg.trend_sma + 1
+    per = cfg.budget / len(series)
+    final = 0.0
+    for v in series.values():
+        qty = int((per - cfg.brokerage_per_order) / (v[start] * (1 + cfg.other_charges_pct)))
+        final += per - qty * v[start] + qty * v[-1]
+    return final
+
+
 def synthetic(kind, days=1500, start=100.0, seed=0):
     rnd = random.Random(seed)
     drift = {"bull": 0.12, "bear": -0.25, "sideways": 0.0, "crash": 0.08}[kind] / 252
@@ -84,6 +95,7 @@ def main():
         series = {s: load_csv(p) for s, p in series.items()}
         cfg.symbols = tuple(series)
         print_result("csv", run(series, cfg, args.verbose), cfg)
+        print(f"{'buy & hold (benchmark)':28s} final ₹{buy_and_hold(series, cfg):9.2f}")
     elif args.upstox:
         from upstox_api import Upstox, resolve_instrument_keys
         api = Upstox(cfg.access_token)
@@ -92,6 +104,7 @@ def main():
         n = min(map(len, series.values()))
         series = {s: v[-n:] for s, v in series.items()}
         print_result(f"upstox {n} days", run(series, cfg, args.verbose), cfg)
+        print(f"{'buy & hold (benchmark)':28s} final ₹{buy_and_hold(series, cfg):9.2f}")
     else:
         print(f"Budget ₹{cfg.budget:.0f}, floor ₹{cfg.capital_floor:.0f}. Synthetic stress tests:\n")
         for kind in ("bull", "sideways", "bear", "crash"):
