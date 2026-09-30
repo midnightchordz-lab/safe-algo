@@ -22,19 +22,32 @@ def decide(state, closes, cfg):
     Returns a list of orders: {"symbol", "side", "qty", "reason"}. Sells come first.
     Does not mutate state (apply fills with `apply_fill`).
     """
-    if state["halted"]:
-        return []
     prices = {s: c[-1] for s, c in closes.items()}
     eq = equity(state, prices)
     orders = []
 
-    # 1) Kill switch: sell everything and stop.
-    if floor_breached(eq, cfg):
+    # 0) Last-resort floor: applies even while halted/frozen.
+    if eq < cfg.hard_floor and state["positions"]:
         for s, p in state["positions"].items():
-            orders.append({"symbol": s, "side": "SELL", "qty": p["qty"], "reason": "capital_floor"})
+            orders.append({"symbol": s, "side": "SELL", "qty": p["qty"], "reason": "hard_floor"})
+        if not state["halted"]:
+            orders.append({"symbol": None, "side": "HALT", "qty": 0,
+                           "reason": f"equity {eq:.2f} < hard floor {cfg.hard_floor:.2f}"})
+        return orders
+    if state["halted"]:
+        return []
+
+    # 1) Kill switch: stop trading (and, if configured, sell everything first).
+    if floor_breached(eq, cfg):
+        if cfg.floor_action == "liquidate":
+            for s, p in state["positions"].items():
+                orders.append({"symbol": s, "side": "SELL", "qty": p["qty"], "reason": "capital_floor"})
         orders.append({"symbol": None, "side": "HALT", "qty": 0,
                        "reason": f"equity {eq:.2f} < floor {cfg.capital_floor:.2f}"})
         return orders
+
+    if cfg.strategy == "rebalance":
+        return _rebalance(state, prices, eq, cfg)
 
     # 2) Exits.
     exiting = set()
@@ -61,6 +74,39 @@ def decide(state, closes, cfg):
                 cash -= qty * prices[s] + _cost(qty * prices[s], cfg)
                 open_risk += stop_risk(qty, prices[s], cfg)
     return orders[: cfg.max_orders_per_run + 1]
+
+
+def _rebalance(state, prices, eq, cfg):
+    """Equal-weight buy-and-hold. Trades only on the first run, when weights drift past
+    `rebalance_band`, or when idle cash exceeds 10% of equity (e.g. after a partial fill)."""
+    syms = [s for s in cfg.symbols if s in prices]
+    buffer = cfg.budget * cfg.cash_buffer_pct
+    target = (eq - buffer) / len(syms)
+    held = {s: state["positions"].get(s, {"qty": 0})["qty"] * prices[s] for s in syms}
+    drift = max(abs(held[s] / eq - 1 / len(syms) * (eq - buffer) / eq) for s in syms)
+    idle_cash = state["cash"] - buffer > 0.10 * eq
+    if not state["positions"] or drift > cfg.rebalance_band or idle_cash:
+        reason = "initial_buy" if not state["positions"] else "rebalance"
+    else:
+        return []
+
+    orders = []
+    cash = state["cash"]
+    for s in syms:  # sells first, to fund the buys
+        excess = held[s] - target
+        qty = int(excess // prices[s])
+        if qty > 0 and qty * prices[s] >= cfg.min_order_value:
+            orders.append({"symbol": s, "side": "SELL", "qty": qty, "reason": reason})
+            cash += qty * prices[s] - _cost(qty * prices[s], cfg)
+    for s in syms:
+        want = target - held[s]
+        spendable = cash - buffer
+        value = min(want, spendable - _cost(min(want, spendable), cfg))
+        qty = int(value // prices[s]) if value > 0 else 0
+        if qty > 0 and qty * prices[s] >= cfg.min_order_value:
+            orders.append({"symbol": s, "side": "BUY", "qty": qty, "reason": reason})
+            cash -= qty * prices[s] + _cost(qty * prices[s], cfg)
+    return orders
 
 
 def _cost(value, cfg):

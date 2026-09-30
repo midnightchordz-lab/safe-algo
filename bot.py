@@ -56,11 +56,19 @@ def main():
     mode = "LIVE" if cfg.live else "PAPER"
     log.info("=== run %s, mode %s ===", datetime.now().isoformat(timespec="seconds"), mode)
 
-    if os.path.exists(cfg.halt_file):
-        log.error("Bot is HALTED (%s exists). Read it, then delete it to resume.", cfg.halt_file)
-        return 2
-
     state = load_state(cfg)
+    if "--resume" in sys.argv:
+        state["halted"], state["halt_reason"] = False, ""
+        save_state(cfg, state)
+        if os.path.exists(cfg.halt_file):
+            os.remove(cfg.halt_file)
+        log.info("Halt cleared. Trading resumes on the next run.")
+        return 0
+    if state["halted"]:
+        # Frozen: no normal trading, but the hard floor below is still enforced.
+        log.error("Bot is HALTED: %s. Only the ₹%.0f hard floor is being watched. "
+                  "Run `python3 bot.py --resume` once you've decided to continue.",
+                  state["halt_reason"], cfg.hard_floor)
     api = Upstox(cfg.access_token)
     keys = resolve_instrument_keys(cfg.symbols, cfg.instrument_keys)
 
@@ -86,7 +94,8 @@ def main():
             halt(state, o["reason"])
             with open(cfg.halt_file, "w") as f:
                 f.write(f"{datetime.now().isoformat()} {o['reason']}\n")
-            log.error("KILL SWITCH: %s. Bot halted.", o["reason"])
+            log.error("KILL SWITCH: %s. Trading halted (holdings kept unless the hard floor "
+                      "was hit). Run `python3 bot.py --resume` to continue.", o["reason"])
             continue
         sym, side, qty = o["symbol"], o["side"], o["qty"]
         px = prices[sym]

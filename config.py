@@ -25,7 +25,22 @@ class Config:
     # Optional manual overrides: {"NIFTYBEES": "NSE_EQ|INF204KB14I2"}
     instrument_keys: dict = field(default_factory=dict)
 
-    # --- Strategy (daily candles) -------------------------------------------
+    # --- Strategy ------------------------------------------------------------
+    # "rebalance": hold the ETFs in equal weights, rebalance when they drift apart.
+    # "trend":     trend-following with trailing stops (sits in cash in downtrends).
+    strategy: str = _env("ALGO_STRATEGY", "rebalance")
+    rebalance_band: float = 0.10     # rebalance when a weight drifts 10 points off target (60/40)
+    min_order_value: float = 1_000.0  # skip tiny orders where ₹20 brokerage would be >2%
+
+    # What to do if total value falls below capital_floor:
+    # "freeze":    keep holdings, stop all trading, write HALTED so a human decides.
+    # "liquidate": sell everything, then halt.
+    floor_action: str = _env("ALGO_FLOOR_ACTION", "freeze")
+    # Last resort: even when frozen, if value keeps falling below this, sell everything.
+    # This is what stops a long, slow bear market from grinding the account down.
+    hard_floor: float = _env("ALGO_HARD_FLOOR", 7_000.0, float)
+
+    # --- Trend strategy settings (daily candles) -----------------------------
     trend_sma: int = 100          # only hold while price is above this moving average
     momentum_days: int = 20       # ...and has risen over the last N days
     trailing_stop_pct: float = 0.07  # exit if price falls 7% below its peak since entry
