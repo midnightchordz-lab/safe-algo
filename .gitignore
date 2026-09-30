@@ -1,0 +1,6 @@
+state.json
+state.json.tmp
+algo.log
+HALTED
+.env
+__pycache__/
