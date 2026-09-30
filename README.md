@@ -57,10 +57,24 @@ python bot.py                  # PAPER: real prices, simulated fills, no orders
 ALGO_LIVE=1 python bot.py      # LIVE: real orders
 ```
 
-State is kept in `state.json` and a log in `algo.log`. Example cron job (Mon–Fri, 3:05 PM IST):
+State is kept in `state.json` and a log in `algo.log`.
+
+### Full automation on a Mac
+
+```bash
+python3 install_mac.py            # LIVE; use --paper for practice, --uninstall to remove
 ```
-5 15 * * 1-5  cd /path/to/trading_algo && UPSTOX_ACCESS_TOKEN=$(cat token.txt) python bot.py
-```
+
+This saves your API key/secret to `.env` (readable only by you) and schedules, Monday to Friday:
+
+| Time | What happens |
+|---|---|
+| 09:00 | If today's token is missing, Safari opens the Upstox login page. Log in; the token is captured automatically. |
+| 15:05 | The bot runs by itself (skips if the market is closed). If you skipped the morning login it asks again, waiting up to 15 minutes. |
+
+You get a macOS notification whenever it trades, halts, errors or needs a login. Logs:
+`algo.log`, `autorun-login.log`, `autorun-trade.log`. Upstox requires a human login every day,
+so that step can't be removed. The Mac must be on, awake and online at those times.
 
 **Recommended path:** paper-trade for at least 4–6 weeks, then go live. Don't place manual
 trades in NIFTYBEES/GOLDBEES on the same account, because the bot can't tell them apart from its own.

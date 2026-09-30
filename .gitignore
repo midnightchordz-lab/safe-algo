@@ -5,3 +5,4 @@ HALTED
 .env
 __pycache__/
 token.txt
+autorun-*.log
