@@ -6,3 +6,8 @@ HALTED
 __pycache__/
 token.txt
 autorun-*.log
+swing_state.json
+swing_state.json.tmp
+swing.log
+SWING_HALTED
+swing_data.json

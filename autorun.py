@@ -1,7 +1,8 @@
 """Entry point for the scheduled jobs (see install_mac.py).
 
   python3 autorun.py login   # 9:00 AM: make sure there's a valid token for today
-  python3 autorun.py trade   # 3:05 PM: log in if still needed, then run the bot
+  python3 autorun.py trade   # 3:05 PM: log in if still needed, then run the long-term bot
+  python3 autorun.py swing   # 3:12 PM: run the swing bot (uses the token from the jobs above)
 
 Sends a macOS notification for anything that needs your attention.
 """
@@ -58,12 +59,48 @@ class Collector(logging.Handler):
 
     def emit(self, record):
         msg = record.getMessage()
-        if record.levelno >= logging.WARNING or " BUY " in msg or " SELL " in msg or "filled" in msg:
+        if (record.levelno >= logging.WARNING or " BUY " in msg or " SELL " in msg
+                or " EXIT " in msg or "filled" in msg):
             self.lines.append(msg)
+
+
+def run_swing():
+    """3:12 PM job. Doesn't open its own login (the 9:00/3:05 jobs do); waits briefly for one."""
+    import time
+    if not market_open():
+        print("Market is closed right now; skipping the swing run.", flush=True)
+        return 0
+    token = get_token.read_token()
+    for _ in range(12):
+        if get_token.token_is_valid(token) or not market_open():
+            break
+        time.sleep(60)
+        token = get_token.read_token()
+    if not get_token.token_is_valid(token):
+        notify("Swing bot skipped today: no Upstox login. Its stops and targets stay active at Upstox.")
+        return 1
+    if not market_open():
+        return 0
+    os.environ["UPSTOX_ACCESS_TOKEN"] = token
+    import swing.bot as swing_bot
+
+    collector = Collector()
+    logging.getLogger("swing").addHandler(collector)
+    try:
+        rc = swing_bot.main()
+    except Exception as e:  # noqa: BLE001 - any crash must reach the user
+        logging.getLogger("swing").exception("Swing bot crashed")
+        notify(f"Swing bot error: {e}. Existing stops/targets stay active. See swing.log.", "Safe-Algo Swing")
+        return 1
+    if collector.lines:
+        notify(" | ".join(collector.lines)[:230], "Safe-Algo Swing")
+    return rc
 
 
 def main():
     job = sys.argv[1] if len(sys.argv) > 1 else "trade"
+    if job == "swing":
+        return run_swing()
     if job == "login":
         if not ensure_token(wait_minutes=120):
             notify("No Upstox login this morning. I'll ask again at 3:05 PM.")

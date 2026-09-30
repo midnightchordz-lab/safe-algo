@@ -7,6 +7,7 @@ Endpoints follow the official SDK (github.com/upstox/upstox-python):
 import gzip
 import io
 import json
+from collections import namedtuple
 from datetime import date, timedelta
 
 import requests
@@ -14,6 +15,9 @@ import requests
 API = "https://api.upstox.com"
 ORDER_API = "https://api-hft.upstox.com"
 INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
+
+
+Candle = namedtuple("Candle", "date open high low close volume")
 
 
 class UpstoxError(RuntimeError):
@@ -52,6 +56,30 @@ class Upstox:
         today = to.isoformat()
         rows = sorted(candles, key=lambda c: c[0])
         return [c[4] for c in rows if include_today or not c[0].startswith(today)]
+
+    def daily_candles(self, instrument_key, days=400, include_today=False):
+        """Daily candles, oldest first, as Candle tuples (date is 'YYYY-MM-DD')."""
+        to = date.today()
+        frm = to - timedelta(days=days)
+        url = f"{API}/v3/historical-candle/{instrument_key}/days/1/{to.isoformat()}/{frm.isoformat()}"
+        rows = sorted(self._req("GET", url)["candles"], key=lambda c: c[0])
+        today = to.isoformat()
+        return [Candle(c[0][:10], c[1], c[2], c[3], c[4], c[5]) for c in rows
+                if include_today or not c[0].startswith(today)]
+
+    def today_ohlc(self, instrument_keys):
+        """{instrument_key: Candle} for today's session so far (up to 500 keys per call)."""
+        out = {}
+        for i in range(0, len(instrument_keys), 500):
+            chunk = instrument_keys[i:i + 500]
+            data = self._req("GET", f"{API}/v3/market-quote/ohlc",
+                             params={"instrument_key": ",".join(chunk), "interval": "1d"})
+            for v in data.values():
+                o = v.get("live_ohlc") or {}
+                if o.get("open"):
+                    out[v["instrument_token"]] = Candle(date.today().isoformat(), o["open"], o["high"],
+                                                        o["low"], v["last_price"], o.get("volume", 0))
+        return out
 
     def ltp(self, instrument_keys):
         data = self._req("GET", f"{API}/v3/market-quote/ltp",
@@ -124,7 +152,37 @@ class Upstox:
         return int(d.get("filled_quantity") or 0), float(d.get("average_price") or 0.0)
 
 
-def resolve_instrument_keys(symbols, overrides=None):
+    # --- GTT (orders held by Upstox, triggered during market hours) ---------------
+    def place_bracket_gtt(self, instrument_key, qty, stop, target):
+        """Buy now and park a 3:1 target and a stop-loss at Upstox (one-cancels-other).
+
+        Returns the GTT order id. The exits fire even if this computer is off.
+        """
+        body = {
+            "type": "MULTIPLE",
+            "quantity": int(qty),
+            "product": "D",
+            "instrument_token": instrument_key,
+            "transaction_type": "BUY",
+            "rules": [
+                {"strategy": "ENTRY", "trigger_type": "IMMEDIATE", "trigger_price": 0},
+                {"strategy": "TARGET", "trigger_type": "IMMEDIATE", "trigger_price": round(target, 1)},
+                {"strategy": "STOPLOSS", "trigger_type": "IMMEDIATE", "trigger_price": round(stop, 1)},
+            ],
+        }
+        data = self._req("POST", f"{ORDER_API}/v3/order/gtt/place", data=json.dumps(body))
+        return data["gtt_order_ids"][0]
+
+    def gtt_details(self, gtt_order_id):
+        data = self._req("GET", f"{API}/v3/order/gtt", params={"gtt_order_id": gtt_order_id})
+        return data[0] if isinstance(data, list) else data
+
+    def cancel_gtt(self, gtt_order_id):
+        return self._req("DELETE", f"{ORDER_API}/v3/order/gtt/cancel",
+                         data=json.dumps({"gtt_order_id": gtt_order_id}))
+
+
+def resolve_instrument_keys(symbols, overrides=None, strict=True):
     """Map NSE trading symbols to Upstox instrument keys using the public instruments file."""
     overrides = overrides or {}
     missing = [s for s in symbols if s not in overrides]
@@ -136,6 +194,6 @@ def resolve_instrument_keys(symbols, overrides=None):
             if row.get("segment") == "NSE_EQ" and row.get("trading_symbol") in missing:
                 keys[row["trading_symbol"]] = row["instrument_key"]
     not_found = [s for s in symbols if s not in keys]
-    if not_found:
+    if not_found and strict:
         raise UpstoxError(f"Could not find instrument keys for {not_found}")
     return keys

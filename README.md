@@ -101,3 +101,40 @@ trades in NIFTYBEES/GOLDBEES on the same account, because the bot can't tell the
 - **Small-account costs:** at ₹10k, the ₹20-per-order brokerage is a noticeable drag (about 1% per round trip).
 - **Endpoints** follow the official `upstox-python` SDK (v3 orders/candles/LTP). Verify with a
   paper run first. Upstox changes APIs from time to time.
+
+---
+
+# Swing bot (separate ₹25,000 budget)
+
+Trades Nifty 50 stocks, holding each for days to a few weeks. Every trade risks ₹1 to make ₹3.
+It has its own money, state (`swing_state.json`), log (`swing.log`) and halt file (`SWING_HALTED`),
+and never touches the long-term bot's holdings.
+
+**Entry (daily, ~3:12 PM):** the stock is in an uptrend (above its 200-day average, 50-day above
+200-day) and either makes a new 20-day closing high (`breakout`) or dips below and reclaims its
+20-day average (`pullback`). The backtest decides which rule to use.
+
+**Exit:** a stop-loss 1.5 × ATR below entry, a target 3× that distance above, or after 20 trading days.
+In LIVE mode the stop and target are a single Upstox GTT order, so **Upstox triggers them during
+market hours even if your Mac is off**.
+
+| Guardrail | Setting |
+|---|---|
+| Risk per trade | 1% of equity (about ₹250) |
+| Reward : risk | 3 : 1 on every trade |
+| Open positions | at most 3, and at most 2 new per day |
+| Single stock | at most 35% of equity |
+| Total open risk | at most 3% of equity if every stop hit at once |
+| Losing streak | after 4 losses in a row, no new trades for 5 days |
+| Soft floor (₹21,250, −15%) | stop new trades, keep stops/targets, notify you |
+| Hard floor (₹17,500, −30%) | sell everything and halt |
+| Costs | skip trades where charges exceed 0.35R or order < ₹3,000 |
+| Same day twice | refused, so nothing is double-traded |
+
+```bash
+python3 -m swing.backtest --upstox    # real-data backtest of every rule (downloads ~50 stocks once)
+python3 -m swing.bot                  # PAPER run
+SWING_LIVE=1 python3 -m swing.bot     # LIVE run
+python3 -m swing.bot --resume         # clear a halt
+python3 install_mac.py --swing-live   # automate it live (default install keeps swing in PAPER)
+```
