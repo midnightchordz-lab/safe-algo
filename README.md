@@ -50,7 +50,8 @@ On about 6.8 years of real prices (2019–2026, including the March 2020 crash),
 
 ## Running it
 
-Run it **once per trading day between about 3:00 and 3:15 PM IST**:
+Run it **once per trading day around 2:50 PM IST**. No orders go out after 3:10 PM, clear of the
+closing auction session (CAS) from about 3:15 PM:
 
 ```bash
 python bot.py                  # PAPER: real prices, simulated fills, no orders
@@ -70,7 +71,7 @@ This saves your API key/secret to `.env` (readable only by you) and schedules, M
 | Time | What happens |
 |---|---|
 | 09:00 | If today's token is missing, Safari opens the Upstox login page. Log in; the token is captured automatically. |
-| 15:05 | The bot runs by itself (skips if the market is closed). If you skipped the morning login it asks again, waiting up to 15 minutes. |
+| 14:50 | The long-term bot runs by itself (skips if the market is closed). If you skipped the morning login it asks again, waiting up to 15 minutes. |
 
 You get a macOS notification whenever it trades, halts, errors or needs a login. Logs:
 `algo.log`, `autorun-login.log`, `autorun-trade.log`. Upstox requires a human login every day,
@@ -110,7 +111,7 @@ Trades Nifty 50 stocks, holding each for days to a few weeks. Every trade risks 
 It has its own money, state (`swing_state.json`), log (`swing.log`) and halt file (`SWING_HALTED`),
 and never touches the long-term bot's holdings.
 
-**Entry (daily, ~3:12 PM):** the stock is in an uptrend (above its 200-day average, 50-day above
+**Entry (daily, ~2:57 PM):** the stock is in an uptrend (above its 200-day average, 50-day above
 200-day) and either makes a new 20-day closing high (`breakout`) or dips below and reclaims its
 20-day average (`pullback`). The backtest decides which rule to use.
 

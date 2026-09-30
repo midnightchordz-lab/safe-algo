@@ -7,8 +7,9 @@
 
 Creates three scheduled jobs (launchd), Monday to Friday:
   09:00  opens the Upstox login page if today's token is missing
-  15:05  runs the long-term bot (asks for the login again first if you skipped the morning one)
-  15:12  runs the swing bot
+  14:50  runs the long-term bot (asks for the login again first if you skipped the morning one)
+  14:57  runs the swing bot
+No orders are placed after 15:10, clear of the closing auction session.
 Your Mac must be switched on, awake and online at those times.
 """
 import os
@@ -20,8 +21,8 @@ import envfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 AGENTS = os.path.expanduser("~/Library/LaunchAgents")
-JOBS = {"com.safealgo.login": ("login", 9, 0), "com.safealgo.trade": ("trade", 15, 5),
-        "com.safealgo.swing": ("swing", 15, 12)}
+JOBS = {"com.safealgo.login": ("login", 9, 0), "com.safealgo.trade": ("trade", 14, 50),
+        "com.safealgo.swing": ("swing", 14, 57)}
 OLD_JOBS = ["com.safealgo.morninglogin"]  # the earlier Terminal-window login reminder
 
 
@@ -70,8 +71,9 @@ def install(live, swing_live):
     print(f"  Long-term bot: {'LIVE (real orders)' if live else 'PAPER (practice)'}")
     print(f"  Swing bot:     {'LIVE (real orders)' if swing_live else 'PAPER (practice)'}")
     print("  Mon-Fri 09:00  Upstox login page opens if needed. Just log in.")
-    print("  Mon-Fri 15:05  long-term bot runs by itself")
-    print("  Mon-Fri 15:12  swing bot runs by itself")
+    print("  Mon-Fri 14:50  long-term bot runs by itself")
+    print("  Mon-Fri 14:57  swing bot runs by itself")
+    print("  No orders after 15:10 (clear of the closing auction session)")
     print("You get a notification whenever either bot trades or needs you.")
     print("Keep the Mac on, plugged in and awake at those times.")
 

@@ -1,4 +1,4 @@
-"""Swing bot runner. Run once per trading day at ~3:10 PM IST.
+"""Swing bot runner. Run once per trading day at ~2:57 PM IST (orders stop at 3:10 PM).
 
   python3 -m swing.bot                # PAPER: real prices, simulated fills
   SWING_LIVE=1 python3 -m swing.bot   # LIVE: real orders with broker-held stop and target
@@ -14,6 +14,7 @@ import sys
 import time
 from datetime import date, datetime
 
+from market_hours import can_place_orders
 from swing.config import SwingConfig
 from swing.engine import (check_exit, close_position, end_of_day, equity, floor_action,
                           new_state, open_position, pick_entries)
@@ -138,7 +139,7 @@ def main():
                 log.warning("%s no longer held but its GTT didn't report a fill; recording exit at ₹%.2f",
                             s, prices[s])
                 close_position(state, s, prices[s], "closed_outside_bot", today_str, cfg)
-            elif pos["bars"] + 1 >= cfg.max_hold_days:
+            elif pos["bars"] + 1 >= cfg.max_hold_days and can_place_orders():
                 qty, avg = sell_now(api, cfg, key, pos, prices[s])
                 if qty:
                     pnl = close_position(state, s, avg, "time", today_str, cfg)
@@ -179,6 +180,9 @@ def main():
         log.info("Cooling off after a losing streak: %d more day(s) without new entries.", state["pause_left"])
     for e in pick_entries(state, inds, idx, prices, eq, cfg):
         s = e["symbol"]
+        if cfg.live and not can_place_orders():
+            log.error("Past the 3:10 PM order cutoff; skipping new entries today.")
+            break
         log.info("%s BUY %d %s @ ~₹%.2f  stop ₹%.2f  target ₹%.2f  (risk ₹%.0f)", mode, e["qty"], s,
                  e["price"], e["stop"], e["target"], e["qty"] * (e["price"] - e["stop"]))
         if cfg.live:

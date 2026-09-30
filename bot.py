@@ -1,4 +1,4 @@
-"""Run once per trading day, around 3:00-3:15 PM IST (after enough of the day has traded).
+"""Run once per trading day, around 2:50 PM IST (orders stop at 3:10 PM, before the closing auction).
 
   python bot.py              # PAPER mode (default): reads real prices, places no orders
   ALGO_LIVE=1 python bot.py  # LIVE mode: places real delivery orders on Upstox
@@ -12,6 +12,7 @@ import sys
 from datetime import datetime
 
 from config import Config
+from market_hours import can_place_orders
 from engine import apply_fill, decide, equity, halt, new_state, update_peaks
 from upstox_api import Upstox, UpstoxError, resolve_instrument_keys
 
@@ -98,6 +99,9 @@ def main():
                       "was hit). Run `python3 bot.py --resume` to continue.", o["reason"])
             continue
         sym, side, qty = o["symbol"], o["side"], o["qty"]
+        if cfg.live and not can_place_orders():
+            log.error("Past the 3:10 PM order cutoff; not placing %s %s. It will retry tomorrow.", side, sym)
+            break
         px = prices[sym]
         limit = px * (1 + cfg.limit_slippage_pct) if side == "BUY" else px * (1 - cfg.limit_slippage_pct)
         log.info("%s %s %d %s @ ~₹%.2f (limit ₹%.2f) reason=%s", mode, side, qty, sym, px, limit, o["reason"])

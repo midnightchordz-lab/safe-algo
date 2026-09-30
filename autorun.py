@@ -1,8 +1,10 @@
 """Entry point for the scheduled jobs (see install_mac.py).
 
   python3 autorun.py login   # 9:00 AM: make sure there's a valid token for today
-  python3 autorun.py trade   # 3:05 PM: log in if still needed, then run the long-term bot
-  python3 autorun.py swing   # 3:12 PM: run the swing bot (uses the token from the jobs above)
+  python3 autorun.py trade   # 2:50 PM: log in if still needed, then run the long-term bot
+  python3 autorun.py swing   # 2:57 PM: run the swing bot (uses the token from the jobs above)
+
+No orders after 3:10 PM, so nothing lands in the closing auction session (from ~3:15 PM).
 
 Sends a macOS notification for anything that needs your attention.
 """
@@ -10,15 +12,13 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime, time as dtime
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
 import envfile
 
 envfile.load()
 import get_token  # noqa: E402  (needs the .env values loaded first)
-
-IST = ZoneInfo("Asia/Kolkata")
+from market_hours import IST, can_place_orders  # noqa: E402
 
 
 def notify(message, title="Safe-Algo"):
@@ -31,8 +31,7 @@ def notify(message, title="Safe-Algo"):
 
 
 def market_open(now=None):
-    now = now or datetime.now(IST)
-    return now.weekday() < 5 and dtime(9, 20) <= now.time() <= dtime(15, 25)
+    return can_place_orders(now)
 
 
 def ensure_token(wait_minutes):
@@ -46,7 +45,7 @@ def ensure_token(wait_minutes):
         notify(f"Could not start the login helper: {e}")
         return ""
     if token:
-        notify("Upstox login OK. The bot will run by itself at 3:05 PM.")
+        notify("Upstox login OK. The bots will run by themselves this afternoon.")
     return token
 
 
@@ -65,7 +64,7 @@ class Collector(logging.Handler):
 
 
 def run_swing():
-    """3:12 PM job. Doesn't open its own login (the 9:00/3:05 jobs do); waits briefly for one."""
+    """2:57 PM job. Doesn't open its own login (the 9:00/2:50 jobs do); waits briefly for one."""
     import time
     if not market_open():
         print("Market is closed right now; skipping the swing run.", flush=True)
@@ -103,7 +102,7 @@ def main():
         return run_swing()
     if job == "login":
         if not ensure_token(wait_minutes=120):
-            notify("No Upstox login this morning. I'll ask again at 3:05 PM.")
+            notify("No Upstox login this morning. I'll ask again at 2:50 PM.")
         return 0
 
     if not market_open():
