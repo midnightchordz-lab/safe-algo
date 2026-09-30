@@ -34,15 +34,15 @@ strong bull runs. It aims to stay out of long crashes, which are what wipe out s
 ## Setup
 
 1. Create an app at the Upstox developer console to get an API key and secret.
-2. Generate an **access token** (the OAuth login flow). Upstox tokens expire every day,
-   so you need a fresh one each morning.
+2. Each morning, run `python get_token.py` (needs `UPSTOX_API_KEY` / `UPSTOX_API_SECRET`)
+   to log in and save the day's access token to `token.txt`. Upstox tokens expire every day.
 3. Install and test:
    ```bash
    cd trading_algo
    pip install -r requirements.txt
    python -m unittest discover -s tests       # safety tests
    python backtest.py                         # synthetic stress tests (bull/bear/sideways/crash)
-   export UPSTOX_ACCESS_TOKEN=...
+   export UPSTOX_ACCESS_TOKEN=$(cat token.txt)
    python backtest.py --upstox --days 2500    # backtest on real NIFTYBEES/GOLDBEES history
    ```
 
