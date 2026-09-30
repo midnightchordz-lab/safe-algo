@@ -24,7 +24,7 @@ class SwingConfig:
     # --- Entry rule ----------------------------------------------------------
     # "breakout": new 20-day closing high in an uptrend.
     # "pullback": price dips below its 20-day average in an uptrend, then closes back above it.
-    entry: str = _env("SWING_ENTRY", "breakout")
+    entry: str = _env("SWING_ENTRY", "pullback")  # best of the 4 in the 2019-2026 backtest
     atr_stop_mult: float = _env("SWING_ATR_MULT", 1.5, float)  # stop = entry - 1.5 x ATR(14)
     reward_risk: float = 3.0              # target = entry + 3 x (entry - stop)
     max_hold_days: int = 20               # exit at market after 20 trading days if neither hit
