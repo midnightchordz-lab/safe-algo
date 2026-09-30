@@ -46,12 +46,18 @@ def run(series, cfg, verbose=False):
 def buy_and_hold(series, cfg):
     """Benchmark: split the budget equally on the first tradable day and never sell."""
     start = cfg.trend_sma + 1
+    n = min(len(v) for v in series.values())
     per = cfg.budget / len(series)
-    final = 0.0
-    for v in series.values():
-        qty = int((per - cfg.brokerage_per_order) / (v[start] * (1 + cfg.other_charges_pct)))
-        final += per - qty * v[start] + qty * v[-1]
-    return final
+    qtys = {s: int((per - cfg.brokerage_per_order) / (v[start] * (1 + cfg.other_charges_pct)))
+            for s, v in series.items()}
+    cash = cfg.budget - sum(q * series[s][start] for s, q in qtys.items())
+    curve = [cash + sum(q * series[s][t] for s, q in qtys.items()) for t in range(start, n)]
+    peak, mdd = -math.inf, 0.0
+    for v in curve:
+        peak = max(peak, v)
+        mdd = max(mdd, (peak - v) / peak)
+    return {"final": curve[-1], "min": min(curve), "max_drawdown": mdd, "trades": len(qtys),
+            "halted": False, "halt_reason": ""}
 
 
 def synthetic(kind, days=1500, start=100.0, seed=0):
@@ -95,7 +101,7 @@ def main():
         series = {s: load_csv(p) for s, p in series.items()}
         cfg.symbols = tuple(series)
         print_result("csv", run(series, cfg, args.verbose), cfg)
-        print(f"{'buy & hold (benchmark)':28s} final ₹{buy_and_hold(series, cfg):9.2f}")
+        print_result("buy & hold (benchmark)", buy_and_hold(series, cfg), cfg)
     elif args.upstox:
         from upstox_api import Upstox, resolve_instrument_keys
         api = Upstox(cfg.access_token)
@@ -104,7 +110,7 @@ def main():
         n = min(map(len, series.values()))
         series = {s: v[-n:] for s, v in series.items()}
         print_result(f"upstox {n} days", run(series, cfg, args.verbose), cfg)
-        print(f"{'buy & hold (benchmark)':28s} final ₹{buy_and_hold(series, cfg):9.2f}")
+        print_result("buy & hold (benchmark)", buy_and_hold(series, cfg), cfg)
     else:
         print(f"Budget ₹{cfg.budget:.0f}, floor ₹{cfg.capital_floor:.0f}. Synthetic stress tests:\n")
         for kind in ("bull", "sideways", "bear", "crash"):
