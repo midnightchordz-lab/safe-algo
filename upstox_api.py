@@ -122,6 +122,20 @@ class Upstox:
         data = self._req("POST", f"{ORDER_API}/v3/order/place", data=json.dumps(body))
         return data["order_ids"][0]
 
+    def place_custom_order(self, instrument_key, side, qty, order_type, price, trigger_price=0.0,
+                           product="I", tag="manual-ticket"):
+        """Used only by the manual order-ticket tool (tools/mcx_ticket.py), never by the bots."""
+        assert side in ("BUY", "SELL") and qty > 0 and order_type in ("LIMIT", "SL")
+        body = {"quantity": int(qty), "product": product, "validity": "DAY", "price": round(price, 2),
+                "tag": tag, "instrument_token": instrument_key, "order_type": order_type,
+                "transaction_type": side, "disclosed_quantity": 0, "trigger_price": round(trigger_price, 2),
+                "is_amo": False, "slice": False}
+        data = self._req("POST", f"{ORDER_API}/v3/order/place", data=json.dumps(body))
+        return data["order_ids"][0]
+
+    def order_book(self):
+        return self._req("GET", f"{API}/v2/order/retrieve-all")
+
     def order_details(self, order_id):
         return self._req("GET", f"{API}/v2/order/details", params={"order_id": order_id})
 
