@@ -5,6 +5,10 @@
   python3 install_mac.py --paper       # both in practice mode
   python3 install_mac.py --uninstall
 
+Commodity option bot (AI + news, 6:25 PM): PAPER by default. To trade it live:
+  python3 install_mac.py --commodity-live --commodity-budget 32000 --commodity-max-loss 15000
+  (budget = max premium for its one lot; max-loss = total loss that halts it; needs ANTHROPIC_API_KEY)
+
 Creates three scheduled jobs (launchd), Monday to Friday:
   09:00  opens the Upstox login page if today's token is missing
   14:50  runs the long-term bot (asks for the login again first if you skipped the morning one)
@@ -22,7 +26,7 @@ import envfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 AGENTS = os.path.expanduser("~/Library/LaunchAgents")
 JOBS = {"com.safealgo.login": ("login", 9, 0), "com.safealgo.trade": ("trade", 14, 50),
-        "com.safealgo.swing": ("swing", 14, 57)}
+        "com.safealgo.swing": ("swing", 14, 57), "com.safealgo.commodity": ("commodity", 18, 25)}
 OLD_JOBS = ["com.safealgo.morninglogin"]  # the earlier Terminal-window login reminder
 
 
@@ -42,13 +46,27 @@ def uninstall():
     print("Removed the Safe-Algo schedule. Nothing will run automatically now.")
 
 
-def install(live, swing_live):
+def flag_value(name, default):
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        sys.exit(f"{name} needs a number")
+    return default
+
+
+def install(live, swing_live, commodity_live=False, commodity_budget="0", commodity_max_loss="15000"):
     key = os.environ.get("UPSTOX_API_KEY", "")
     secret = os.environ.get("UPSTOX_API_SECRET", "")
     if not key or not secret or "paste-api" in key or "YOUR_API" in key:
         sys.exit("UPSTOX_API_KEY / UPSTOX_API_SECRET are not set in this Terminal. Fix that first.")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if commodity_live and (not anthropic_key or float(commodity_budget) <= 0):
+        sys.exit("--commodity-live needs ANTHROPIC_API_KEY set in this Terminal and --commodity-budget N.")
     envfile.save({"UPSTOX_API_KEY": key, "UPSTOX_API_SECRET": secret, "ALGO_LIVE": "1" if live else "0",
-                  "SWING_LIVE": "1" if swing_live else "0"})
+                  "SWING_LIVE": "1" if swing_live else "0", "ANTHROPIC_API_KEY": anthropic_key,
+                  "COMMODITY_LIVE": "1" if commodity_live else "0", "COMMODITY_MAX_PREMIUM": commodity_budget,
+                  "COMMODITY_MAX_TOTAL_LOSS": commodity_max_loss})
 
     os.makedirs(AGENTS, exist_ok=True)
     for label in OLD_JOBS:
@@ -57,7 +75,8 @@ def install(live, swing_live):
         remove(label)
         plist = {
             "Label": label,
-            "ProgramArguments": [sys.executable, os.path.join(HERE, "autorun.py"), job],
+            "ProgramArguments": (["/usr/bin/caffeinate", "-i"] if job == "commodity" else [])
+            + [sys.executable, os.path.join(HERE, "autorun.py"), job],
             "WorkingDirectory": HERE,
             "StartCalendarInterval": [{"Weekday": d, "Hour": hour, "Minute": minute} for d in range(1, 6)],
             "StandardOutPath": os.path.join(HERE, f"autorun-{job}.log"),
@@ -74,6 +93,9 @@ def install(live, swing_live):
     print("  Mon-Fri 14:50  long-term bot runs by itself")
     print("  Mon-Fri 14:57  swing bot runs by itself")
     print("  No orders after 15:10 (clear of the closing auction session)")
+    print(f"  Mon-Fri 18:25  commodity option bot: {'LIVE' if commodity_live else 'PAPER'}"
+          + (f" (max premium ₹{float(commodity_budget):,.0f}, halts after ₹{float(commodity_max_loss):,.0f} total loss)"
+             if commodity_live else "") + ("" if anthropic_key else "  [ANTHROPIC_API_KEY missing: it will skip]"))
     print("You get a notification whenever either bot trades or needs you.")
     print("Keep the Mac on, plugged in and awake at those times.")
 
@@ -85,4 +107,7 @@ if __name__ == "__main__":
         uninstall()
     else:
         paper = "--paper" in sys.argv
-        install(live=not paper, swing_live="--swing-live" in sys.argv and not paper)
+        install(live=not paper, swing_live="--swing-live" in sys.argv and not paper,
+                commodity_live="--commodity-live" in sys.argv and not paper,
+                commodity_budget=flag_value("--commodity-budget", "0"),
+                commodity_max_loss=flag_value("--commodity-max-loss", "15000"))

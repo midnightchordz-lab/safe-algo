@@ -139,3 +139,29 @@ SWING_LIVE=1 python3 -m swing.bot     # LIVE run
 python3 -m swing.bot --resume         # clear a halt
 python3 install_mac.py --swing-live   # automate it live (default install keeps swing in PAPER)
 ```
+
+---
+
+# Commodity option bot (AI + live news)
+
+Runs Mon-Fri at 18:25 IST (Mac kept awake with `caffeinate`). Each evening it:
+1. Reads price data for CRUDEOIL futures (trend, momentum, typical daily move, today's 15-minute action).
+2. Has Claude (`claude-opus-5-5`, web search) write a brief of the latest news, then return a strict JSON
+   decision: UP / DOWN / NO_TRADE, confidence, entry trigger, stop and target (futures levels).
+3. Applies hard rules the AI can't override: confidence >= 65 (never below 60), no event risk, levels
+   consistent, stop 0.25-1.5x the daily move, reward >= 1.5x risk, price data must agree.
+4. Waits (18:30-21:30) for the entry level, buys 1 lot of the at-the-money option (intraday), places an
+   exchange stop-loss at once, checks every 30s, and exits at target / stop / 22:45.
+
+Guardrails: 1 lot, 1 trade a day, premium cap (`--commodity-budget`), total-loss halt
+(`--commodity-max-loss`), 5-day pause after 3 losses in a row, never sells an option it doesn't hold.
+Every decision (data, news, AI output, rule verdict) is appended to `commodity_decisions.jsonl`.
+PAPER by default; it only trades real money after `--commodity-live`.
+
+```bash
+pip3 install anthropic                     # once
+python3 -m commodity.bot --decide-only     # tonight's read without trading
+python3 install_mac.py --commodity-live --commodity-budget 32000 --commodity-max-loss 15000
+python3 -m commodity.bot --resume          # clear a halt
+```
+Upstox currently blocks MCX orders via the API, so orders go to NSE commodities (CRUDEOIL, 100-barrel lots).

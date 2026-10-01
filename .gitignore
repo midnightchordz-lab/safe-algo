@@ -12,3 +12,8 @@ swing.log
 SWING_HALTED
 swing_data.json
 manual_trades.log
+commodity_state.json
+commodity_state.json.tmp
+commodity_decisions.jsonl
+commodity.log
+COMMODITY_HALTED

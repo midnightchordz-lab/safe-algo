@@ -3,6 +3,7 @@
   python3 autorun.py login   # 9:00 AM: make sure there's a valid token for today
   python3 autorun.py trade   # 2:50 PM: log in if still needed, then run the long-term bot
   python3 autorun.py swing   # 2:57 PM: run the swing bot (uses the token from the jobs above)
+  python3 autorun.py commodity  # 6:25 PM: AI + news commodity option bot (runs until ~10:45 PM)
 
 No orders after 3:10 PM, so nothing lands in the closing auction session (from ~3:15 PM).
 
@@ -96,10 +97,35 @@ def run_swing():
     return rc
 
 
+def run_commodity():
+    """6:25 PM job: the commodity option bot. Uses today's token; asks for a login if missing."""
+    if datetime.now(IST).weekday() > 4:
+        return 0
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        notify("Commodity bot skipped: ANTHROPIC_API_KEY is not set (re-run install_mac.py).", "Safe-Algo Commodity")
+        return 1
+    token = ensure_token(wait_minutes=15)
+    if not token:
+        notify("Commodity bot skipped tonight: no Upstox login.", "Safe-Algo Commodity")
+        return 1
+    os.environ["UPSTOX_ACCESS_TOKEN"] = token
+    import commodity.bot as commodity_bot
+
+    try:
+        return commodity_bot.main(notify=lambda m: notify(m, "Safe-Algo Commodity"))
+    except Exception as e:  # noqa: BLE001 - any crash must reach the user
+        logging.getLogger("commodity").exception("Commodity bot crashed")
+        notify(f"Commodity bot error: {e}. Check the Upstox app for any open position. See commodity.log.",
+               "Safe-Algo Commodity")
+        return 1
+
+
 def main():
     job = sys.argv[1] if len(sys.argv) > 1 else "trade"
     if job == "swing":
         return run_swing()
+    if job == "commodity":
+        return run_commodity()
     if job == "login":
         if not ensure_token(wait_minutes=120):
             notify("No Upstox login this morning. I'll ask again at 2:50 PM.")
