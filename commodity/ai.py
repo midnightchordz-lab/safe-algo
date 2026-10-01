@@ -32,9 +32,10 @@ DECISION_SYSTEM = (
     "futures level that must be crossed to confirm the move (below current price for DOWN, above "
     "for UP); stop_level invalidates the idea; target_level is a realistic take-profit for tonight. "
     "Set event_risk true if a scheduled release or announcement could whipsaw price tonight. "
-    "watch_above / watch_below: trading-futures levels whose break later tonight would be worth "
-    "a second look (a breakout above, a breakdown below); 0 when there is no such level. The bot "
-    "only watches them when it does not trade on this decision."
+    "watch_above / watch_below: the NEAREST trading-futures levels (within half of the typical daily "
+    "move, ATR, of the current price) whose break later tonight would be worth a second look: a "
+    "breakout above, a breakdown below, e.g. the last hours' high/low or the session average. Not "
+    "the day's extremes. The bot only watches them when it does not trade on this decision."
 )
 
 DECISION_SCHEMA = {

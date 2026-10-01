@@ -59,12 +59,13 @@ class RuleTests(unittest.TestCase):
         self.assertFalse(engine.spread_ok(95, 105, self.cfg)[0])
         self.assertFalse(engine.spread_ok(0, 101, self.cfg)[0])
 
-    def test_watch_levels_sanitised(self):
-        d = {"watch_above": 8958, "watch_below": 8770}
-        self.assertEqual(engine.watch_levels(d, 8830, 380), (8958, 8770))
-        self.assertEqual(engine.watch_levels(d, 8990, 380), (0, 8770))           # already above: dropped
-        self.assertEqual(engine.watch_levels({"watch_above": 9500}, 8830, 380), (0, 0))  # too far away
-        self.assertEqual(engine.watch_levels({}, 8830, 380), (0, 0))
+    def test_watch_levels_kept_near(self):
+        d = {"confidence": 52, "watch_above": 8900, "watch_below": 8700}
+        self.assertEqual(engine.watch_levels(d, 8753, 380), (8900, 8700))
+        far = dict(d, watch_above=8990, watch_below=8560)              # day's extremes: pulled in
+        self.assertEqual(engine.watch_levels(far, 8753, 380), (8943, 8563))
+        self.assertEqual(engine.watch_levels(dict(d, watch_above=0, watch_below=0), 8753, 380), (8943, 8563))
+        self.assertEqual(engine.watch_levels({"confidence": 0}, 8753, 380), (0, 0))  # AI failed
         self.assertEqual(engine.broke(8960, 8958, 8770), "above")
         self.assertEqual(engine.broke(8769, 8958, 8770), "below")
         self.assertIsNone(engine.broke(8830, 8958, 8770))
@@ -230,9 +231,8 @@ class BotTests(unittest.TestCase):
         rc, orders, notes, st = self.run_evening(True, [8800, 8745], gap=2.0)  # bid would be <= 0
         self.assertEqual(orders, [])
 
-    def test_no_trade_without_levels_stops(self):
-        rc, orders, notes, st = self.run_evening(True, [8800] * 50, decision=dict(NO_TRADE_WATCH, watch_above=0,
-                                                                                    watch_below=0))
+    def test_failed_ai_call_watches_nothing(self):
+        rc, orders, notes, st = self.run_evening(True, [8800] * 50, decision=dict(NO_TRADE_WATCH, confidence=0))
         self.assertEqual((orders, len(self.calls)), ([], 1))
         self.assertTrue(any("no trade tonight" in n for n in notes))
 

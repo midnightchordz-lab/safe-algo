@@ -48,12 +48,16 @@ def triggered(side, price, level):
     return price >= level if side == "UP" else price <= level
 
 
-def watch_levels(d, price, atr):
-    """Breakout levels to watch after a no-trade decision. Only levels on the right side of the price
-    and within one typical daily move count; anything else is dropped (0)."""
+def watch_levels(d, price, atr, reach=0.5):
+    """Breakout levels to watch after a no-trade decision, kept near the price: a level that is
+    missing, on the wrong side or further than `reach` x the daily move becomes price +/- reach x ATR.
+    A failed AI call (confidence 0) watches nothing."""
+    if not d.get("confidence") or not atr:
+        return 0.0, 0.0
+    near = reach * atr
     above, below = float(d.get("watch_above") or 0), float(d.get("watch_below") or 0)
-    above = above if price < above <= price + atr else 0.0
-    below = below if price - atr <= below < price else 0.0
+    above = above if price < above <= price + near else round(price + near, 1)
+    below = below if price - near <= below < price else round(price - near, 1)
     return above, below
 
 
