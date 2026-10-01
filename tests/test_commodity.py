@@ -237,10 +237,13 @@ class BotTests(unittest.TestCase):
         self.assertTrue(any("no trade tonight" in n for n in notes))
 
     def test_watch_no_breakout(self):
-        rc, orders, notes, st = self.run_evening(True, [8800] * 2000, decision=NO_TRADE_WATCH)
+        with self.assertLogs("commodity", "INFO") as logs:
+            rc, orders, notes, st = self.run_evening(True, [8800] * 2000, decision=NO_TRADE_WATCH)
         self.assertEqual((orders, len(self.calls)), ([], 1))
         self.assertTrue(any("Watching above 8958 / below 8770" in n for n in notes))
         self.assertTrue(any("no breakout" in n for n in notes))
+        beats = [l for l in logs.output if "crude 8,800.0, watching above 8958 / below 8770 until 21:30" in l]
+        self.assertEqual(len(beats), 36)  # 18:30-21:30: one line every 5 minutes, not every 30 seconds
 
     def test_breakdown_recheck_trades(self):
         recheck = dict(DOWN, entry_trigger=8760, stop_level=8900, target_level=8500)

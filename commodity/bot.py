@@ -27,6 +27,7 @@ from upstox_api import Upstox, UpstoxError
 
 log = logging.getLogger("commodity")
 CHARGES = 120.0  # rough round-trip brokerage + taxes for one option lot
+STATUS_SECONDS = 300  # print a "still watching" line this often
 
 
 def now():
@@ -131,6 +132,14 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
         return 0
 
     mode = "LIVE" if cfg.live else "PAPER"
+    polls = {"n": 0}
+
+    def status(text):
+        """Log a short heartbeat every STATUS_SECONDS so a quiet Terminal is clearly still working."""
+        polls["n"] += 1
+        if polls["n"] % max(1, STATUS_SECONDS // cfg.poll_seconds) == 0:
+            log.info("%s %s", now().strftime("%H:%M"), text)
+
     t0 = now()
     today = t0.date().isoformat()
     log.info("=== commodity run %s, mode %s ===", t0.isoformat(timespec="seconds"), mode)
@@ -202,6 +211,7 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
                 notify(f"Commodity: no breakout ({levels}) by {end}. No trade tonight.")
                 save_state(cfg, state)
                 return 0
+            status(f"crude {fut_price:,.1f}, watching {levels} until {end}")
             sleep(cfg.poll_seconds)
         level = above if way == "above" else below
         log.info("Futures %.2f broke %s %g; asking the AI again.", fut_price, way, level)
@@ -227,6 +237,7 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
         if now().strftime("%H:%M") >= end:
             notify(f"Commodity: entry {decision['entry_trigger']} never triggered by {end}. No trade.")
             return 0
+        status(f"crude {fut_price:,.1f}, waiting for {side} entry {decision['entry_trigger']} until {end}")
         sleep(cfg.poll_seconds)
 
     opt = market.pick_option(trade_rows, side, fut_price, now(), cfg.min_days_to_expiry)
@@ -287,6 +298,8 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
         op = broker.price(opt["instrument_key"]) or fill
         reason = engine.exit_reason(side, fp, op, decision, prem_stop, prem_target, now().strftime("%H:%M"), cfg)
         exit_px = op
+        status(f"crude {fp:,.1f}, option ₹{op:.2f} (bought ₹{fill:.2f}, stop ₹{prem_stop}, target ₹{prem_target}), "
+               f"P&L ~₹{(op - fill) * units * cfg.lots:,.0f}")
     if not reason.startswith("stop (exchange)"):
         exit_px = broker.sell_now(opt["instrument_key"], cfg.lots, stop_id, exit_px or fill)
         if not exit_px:
