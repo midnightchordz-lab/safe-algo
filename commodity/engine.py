@@ -48,6 +48,16 @@ def triggered(side, price, level):
     return price >= level if side == "UP" else price <= level
 
 
+def spread_ok(bid, ask, cfg):
+    """Returns (ok, reason). Thin contracts cost the gap on the way in and again on the way out."""
+    if bid <= 0 or ask <= 0:
+        return False, "no buyers or sellers quoted"
+    gap = (ask - bid) / ((ask + bid) / 2)
+    if gap > cfg.max_spread_pct:
+        return False, f"bid/ask gap {gap * 100:.1f}% (bid ₹{bid:.2f}, ask ₹{ask:.2f}) > {cfg.max_spread_pct * 100:.0f}%"
+    return True, f"bid/ask gap {gap * 100:.1f}%"
+
+
 def premium_levels(fill, plan, cfg, delta=0.5):
     """Option stop and target from the futures plan, assuming the option moves ~delta x futures."""
     stop = fill - delta * abs(plan["entry_trigger"] - plan["stop_level"])

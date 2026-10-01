@@ -35,6 +35,7 @@ class CommodityConfig:
     stop_atr_range: tuple = (0.25, 1.5)    # stop distance must be 0.25-1.5x the typical daily move
     max_premium_loss_pct: float = 0.40     # option stop never more than 40% below the fill
     min_days_to_expiry: int = 5
+    max_spread_pct: float = 0.03           # skip contracts whose bid/ask gap is over 3% of the price
 
     # --- Guardrails ---
     max_trades_per_day: int = 1

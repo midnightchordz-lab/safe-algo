@@ -81,6 +81,16 @@ class Upstox:
                                                         o["low"], v["last_price"], o.get("volume", 0))
         return out
 
+    def best_bid_ask(self, instrument_key):
+        """(best bid, best ask) from the live order book; (0, 0) if nobody is quoting."""
+        data = self._req("GET", f"{API}/v3/market-quote/quotes", params={"instrument_key": instrument_key})
+        quote = next((v for v in data.values() if v.get("instrument_token") == instrument_key),
+                     next(iter(data.values()), {}))
+        depth = quote.get("depth") or {}
+        bids = [d.get("price") or 0 for d in depth.get("buy") or []]
+        asks = [d.get("price") or 0 for d in depth.get("sell") or []]
+        return max(bids, default=0), min((a for a in asks if a > 0), default=0)
+
     def ltp(self, instrument_keys):
         data = self._req("GET", f"{API}/v3/market-quote/ltp",
                          params={"instrument_key": ",".join(instrument_keys)})

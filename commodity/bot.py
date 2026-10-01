@@ -204,15 +204,27 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
     if not prem:
         notify(f"Commodity: no live premium for {opt['trading_symbol']}. No trade.")
         return 0
-    cost = prem * 1.01 * units * cfg.lots
+    try:
+        bid, ask = up.best_bid_ask(opt["instrument_key"])
+    except UpstoxError as e:
+        notify(f"Commodity: couldn't read the order book for {opt['trading_symbol']} ({e}). No trade.")
+        return 0
+    ok, why = engine.spread_ok(bid, ask, cfg)
+    log.info("%s %s", opt["trading_symbol"], why)
+    if not ok:
+        notify(f"Commodity: {opt['trading_symbol']} skipped, {why}. No trade.")
+        return 0
+    limit = round(max(prem * 1.01, ask), 1)  # at least the current ask, so the order can fill
+    cost = limit * units * cfg.lots
     cap = cfg.max_premium if cfg.max_premium > 0 else float("inf")
     if cost > cap:
         notify(f"Commodity: {opt['trading_symbol']} costs ₹{cost:,.0f} > cap ₹{cap:,.0f}. No trade.")
         return 0
 
-    log.info(f"{mode} BUY {cfg.lots} lot {opt['trading_symbol']} @ ~₹{prem:.2f} (₹{cost:,.0f}) | futures {fut_price:.2f}")
+    log.info(f"{mode} BUY {cfg.lots} lot {opt['trading_symbol']} @ ~₹{prem:.2f}, limit ₹{limit:.2f} "
+             f"(₹{cost:,.0f}) | futures {fut_price:.2f}")
     try:
-        fill = broker.buy(opt["instrument_key"], cfg.lots, round(prem * 1.01, 1))
+        fill = broker.buy(opt["instrument_key"], cfg.lots, limit)
     except UpstoxError as e:
         notify(f"Commodity: buy rejected: {e}")
         return 1

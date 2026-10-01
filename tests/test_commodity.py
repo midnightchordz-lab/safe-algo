@@ -49,6 +49,11 @@ class RuleTests(unittest.TestCase):
     def test_no_trade_passthrough(self):
         self.assertFalse(engine.validate({"direction": "NO_TRADE"}, 8800, 380, 8820, self.cfg)[0])
 
+    def test_spread_rule(self):
+        self.assertTrue(engine.spread_ok(99, 101, self.cfg)[0])
+        self.assertFalse(engine.spread_ok(95, 105, self.cfg)[0])
+        self.assertFalse(engine.spread_ok(0, 101, self.cfg)[0])
+
     def test_premium_stop_capped_at_40pct(self):
         stop, target = engine.premium_levels(100, dict(DOWN, stop_level=9500), self.cfg)
         self.assertEqual(stop, 60.0)
@@ -105,7 +110,7 @@ class Clock:
 class BotTests(unittest.TestCase):
     """A full evening: entry triggers, price falls to target, exit."""
 
-    def run_evening(self, live, path, decision=DOWN, cap="40000"):
+    def run_evening(self, live, path, decision=DOWN, cap="40000", gap=0.01):
         import commodity.bot as bot
         tmp = tempfile.mkdtemp()
         env = {"COMMODITY_LIVE": "1" if live else "0", "COMMODITY_MAX_PREMIUM": cap}
@@ -139,6 +144,10 @@ class BotTests(unittest.TestCase):
 
             def cancel_order(self, oid):
                 orders.append(("CANCEL", oid, "", 0, 0))
+
+            def best_bid_ask(self, key):
+                mid = self.ltp([key])[key]
+                return mid * (1 - gap / 2), mid * (1 + gap / 2)
 
         analyst = types.SimpleNamespace(news_brief=lambda c: ("news", []),
                                         decide=lambda *a: (decision, ""))
@@ -191,6 +200,15 @@ class BotTests(unittest.TestCase):
         rc, orders, notes, st = self.run_evening(True, [8800, 8745], cap="5000")
         self.assertEqual(orders, [])
         self.assertTrue(any("> cap" in n for n in notes))
+
+    def test_wide_spread_no_trade(self):
+        rc, orders, notes, st = self.run_evening(True, [8800, 8745], gap=0.08)
+        self.assertEqual(orders, [])
+        self.assertTrue(any("bid/ask gap" in n for n in notes))
+
+    def test_no_quotes_no_trade(self):
+        rc, orders, notes, st = self.run_evening(True, [8800, 8745], gap=2.0)  # bid would be <= 0
+        self.assertEqual(orders, [])
 
     def test_live_requires_cap(self):
         rc, orders, notes, st = self.run_evening(True, [8800], cap="0")
