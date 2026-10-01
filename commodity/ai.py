@@ -54,6 +54,13 @@ NO_TRADE = {"direction": "NO_TRADE", "confidence": 0, "entry_trigger": 0, "stop_
             "target_level": 0, "event_risk": True, "key_risks": []}
 
 
+def _why(e):
+    """Short, readable reason for an API failure (status + Anthropic's own message)."""
+    status = getattr(e, "status_code", "")
+    msg = getattr(e, "message", "") or str(e)
+    return f"{e.__class__.__name__} {status}: {msg}"[:300]
+
+
 def _text(response):
     return "\n".join(b.text for b in response.content if getattr(b, "type", "") == "text")
 
@@ -93,7 +100,7 @@ class Analyst:
                     return _text(r), _sources(r)
                 messages.append({"role": "assistant", "content": r.content})
         except anthropic.APIError as e:
-            return f"(news unavailable: {e.__class__.__name__})", []
+            return f"(news unavailable: {_why(e)})", []
         return "", []
 
     def decide(self, commodity, tech, trade_future, trade_future_price, news, now_text):
@@ -110,7 +117,7 @@ class Analyst:
                 messages=[{"role": "user", "content": prompt}],
                 extra_body={"output_config": {"format": {"type": "json_schema", "schema": DECISION_SCHEMA}}})
         except anthropic.APIError as e:
-            return dict(NO_TRADE, reasoning=f"AI call failed: {e.__class__.__name__}"), ""
+            return dict(NO_TRADE, reasoning=f"AI call failed: {_why(e)}"), ""
         raw = _text(r)
         if r.stop_reason in ("refusal", "max_tokens"):
             return dict(NO_TRADE, reasoning=f"AI stopped: {r.stop_reason}"), raw
