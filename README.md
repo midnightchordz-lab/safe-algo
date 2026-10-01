@@ -40,7 +40,7 @@ On about 6.8 years of real prices (2019–2026, including the March 2020 crash),
    to log in and save the day's access token to `token.txt`. Upstox tokens expire every day.
 3. Install and test:
    ```bash
-   cd trading_algo
+   cd safe-algo
    pip install -r requirements.txt
    python -m unittest discover -s tests       # safety tests
    python backtest.py                         # synthetic stress tests (bull/bear/sideways/crash)

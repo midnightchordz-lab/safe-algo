@@ -1,4 +1,4 @@
-"""Load KEY=VALUE lines from trading_algo/.env into the environment (if the file exists).
+"""Load KEY=VALUE lines from .env (repo root) into the environment (if the file exists).
 
 Scheduled jobs don't read ~/.zshrc, so install_mac.py saves the settings they need here.
 Variables already set in the environment win.

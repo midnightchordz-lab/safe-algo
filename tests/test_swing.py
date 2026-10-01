@@ -1,4 +1,4 @@
-"""Swing bot guardrail tests: `python3 -m unittest discover -s tests` from trading_algo/."""
+"""Swing bot guardrail tests: `python3 -m unittest discover -s tests` from the repo root."""
 import os
 import sys
 import unittest

@@ -1,4 +1,4 @@
-"""Safety tests: run with `python -m unittest discover -s tests` from trading_algo/."""
+"""Safety tests: run with `python -m unittest discover -s tests` from the repo root."""
 import os
 import sys
 import unittest
