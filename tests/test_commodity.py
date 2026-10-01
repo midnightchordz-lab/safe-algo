@@ -18,6 +18,11 @@ DOWN = {"direction": "DOWN", "confidence": 70, "entry_trigger": 8750, "stop_leve
         "target_level": 8400, "event_risk": False, "reasoning": "test", "key_risks": []}
 
 
+NO_TRADE_WATCH = {"direction": "NO_TRADE", "confidence": 52, "entry_trigger": 8960, "stop_level": 8770,
+                  "target_level": 9120, "event_risk": False, "watch_above": 8958, "watch_below": 8770,
+                  "reasoning": "signals conflict", "key_risks": []}
+
+
 class RuleTests(unittest.TestCase):
     def setUp(self):
         self.cfg = CommodityConfig()
@@ -53,6 +58,16 @@ class RuleTests(unittest.TestCase):
         self.assertTrue(engine.spread_ok(99, 101, self.cfg)[0])
         self.assertFalse(engine.spread_ok(95, 105, self.cfg)[0])
         self.assertFalse(engine.spread_ok(0, 101, self.cfg)[0])
+
+    def test_watch_levels_sanitised(self):
+        d = {"watch_above": 8958, "watch_below": 8770}
+        self.assertEqual(engine.watch_levels(d, 8830, 380), (8958, 8770))
+        self.assertEqual(engine.watch_levels(d, 8990, 380), (0, 8770))           # already above: dropped
+        self.assertEqual(engine.watch_levels({"watch_above": 9500}, 8830, 380), (0, 0))  # too far away
+        self.assertEqual(engine.watch_levels({}, 8830, 380), (0, 0))
+        self.assertEqual(engine.broke(8960, 8958, 8770), "above")
+        self.assertEqual(engine.broke(8769, 8958, 8770), "below")
+        self.assertIsNone(engine.broke(8830, 8958, 8770))
 
     def test_premium_stop_capped_at_40pct(self):
         stop, target = engine.premium_levels(100, dict(DOWN, stop_level=9500), self.cfg)
@@ -110,7 +125,7 @@ class Clock:
 class BotTests(unittest.TestCase):
     """A full evening: entry triggers, price falls to target, exit."""
 
-    def run_evening(self, live, path, decision=DOWN, cap="40000", gap=0.01):
+    def run_evening(self, live, path, decision=DOWN, cap="40000", gap=0.01, recheck=None):
         import commodity.bot as bot
         tmp = tempfile.mkdtemp()
         env = {"COMMODITY_LIVE": "1" if live else "0", "COMMODITY_MAX_PREMIUM": cap}
@@ -149,8 +164,13 @@ class BotTests(unittest.TestCase):
                 mid = self.ltp([key])[key]
                 return mid * (1 - gap / 2), mid * (1 + gap / 2)
 
-        analyst = types.SimpleNamespace(news_brief=lambda c: ("news", []),
-                                        decide=lambda *a: (decision, ""))
+        self.calls = []
+
+        def decide(*a, update=""):
+            self.calls.append(update)
+            return (recheck if update else decision), ""
+
+        analyst = types.SimpleNamespace(news_brief=lambda c: ("news", []), decide=decide)
         tech = {"price": 8800, "atr14": 380, "today": {"avg": 8820}}
         notes = []
         with mock.patch.dict(os.environ, env), \
@@ -209,6 +229,39 @@ class BotTests(unittest.TestCase):
     def test_no_quotes_no_trade(self):
         rc, orders, notes, st = self.run_evening(True, [8800, 8745], gap=2.0)  # bid would be <= 0
         self.assertEqual(orders, [])
+
+    def test_no_trade_without_levels_stops(self):
+        rc, orders, notes, st = self.run_evening(True, [8800] * 50, decision=dict(NO_TRADE_WATCH, watch_above=0,
+                                                                                    watch_below=0))
+        self.assertEqual((orders, len(self.calls)), ([], 1))
+        self.assertTrue(any("no trade tonight" in n for n in notes))
+
+    def test_watch_no_breakout(self):
+        rc, orders, notes, st = self.run_evening(True, [8800] * 2000, decision=NO_TRADE_WATCH)
+        self.assertEqual((orders, len(self.calls)), ([], 1))
+        self.assertTrue(any("Watching above 8958 / below 8770" in n for n in notes))
+        self.assertTrue(any("no breakout" in n for n in notes))
+
+    def test_breakdown_recheck_trades(self):
+        recheck = dict(DOWN, entry_trigger=8760, stop_level=8900, target_level=8500)
+        rc, orders, notes, st = self.run_evening(True, [8800, 8790, 8765, 8740, 8700, 8480],
+                                                 decision=NO_TRADE_WATCH, recheck=recheck)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn("broke below 8770", self.calls[1])
+        self.assertEqual((orders[0][0], orders[0][2]), ("BUY", "LIMIT"))
+        self.assertEqual(st["trades"][0]["reason"], "target")
+
+    def test_recheck_says_no_only_one_recheck(self):
+        rc, orders, notes, st = self.run_evening(True, [8800, 8965] + [8800, 8965] * 500,
+                                                 decision=NO_TRADE_WATCH, recheck=NO_TRADE_WATCH)
+        self.assertEqual((orders, len(self.calls)), ([], 2))
+        self.assertTrue(any("re-check says no trade" in n for n in notes))
+
+    def test_recheck_still_needs_hard_rules(self):
+        weak = dict(DOWN, confidence=55)
+        rc, orders, notes, st = self.run_evening(True, [8800, 8765], decision=NO_TRADE_WATCH, recheck=weak)
+        self.assertEqual(orders, [])
+        self.assertTrue(any("confidence 55" in n for n in notes))
 
     def test_live_requires_cap(self):
         rc, orders, notes, st = self.run_evening(True, [8800], cap="0")

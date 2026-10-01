@@ -48,6 +48,24 @@ def triggered(side, price, level):
     return price >= level if side == "UP" else price <= level
 
 
+def watch_levels(d, price, atr):
+    """Breakout levels to watch after a no-trade decision. Only levels on the right side of the price
+    and within one typical daily move count; anything else is dropped (0)."""
+    above, below = float(d.get("watch_above") or 0), float(d.get("watch_below") or 0)
+    above = above if price < above <= price + atr else 0.0
+    below = below if price - atr <= below < price else 0.0
+    return above, below
+
+
+def broke(price, above, below):
+    """'above' / 'below' when price crosses a watched level, else None."""
+    if above and price >= above:
+        return "above"
+    if below and price <= below:
+        return "below"
+    return None
+
+
 def spread_ok(bid, ask, cfg):
     """Returns (ok, reason). Thin contracts cost the gap on the way in and again on the way out."""
     if bid <= 0 or ask <= 0:

@@ -31,7 +31,10 @@ DECISION_SYSTEM = (
     "the session. All levels are prices of the TRADING futures contract given. entry_trigger is the "
     "futures level that must be crossed to confirm the move (below current price for DOWN, above "
     "for UP); stop_level invalidates the idea; target_level is a realistic take-profit for tonight. "
-    "Set event_risk true if a scheduled release or announcement could whipsaw price tonight."
+    "Set event_risk true if a scheduled release or announcement could whipsaw price tonight. "
+    "watch_above / watch_below: trading-futures levels whose break later tonight would be worth "
+    "a second look (a breakout above, a breakdown below); 0 when there is no such level. The bot "
+    "only watches them when it does not trade on this decision."
 )
 
 DECISION_SCHEMA = {
@@ -43,16 +46,18 @@ DECISION_SCHEMA = {
         "stop_level": {"type": "number"},
         "target_level": {"type": "number"},
         "event_risk": {"type": "boolean"},
+        "watch_above": {"type": "number"},
+        "watch_below": {"type": "number"},
         "reasoning": {"type": "string"},
         "key_risks": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["direction", "confidence", "entry_trigger", "stop_level", "target_level",
-                 "event_risk", "reasoning", "key_risks"],
+                 "event_risk", "watch_above", "watch_below", "reasoning", "key_risks"],
     "additionalProperties": False,
 }
 
 NO_TRADE = {"direction": "NO_TRADE", "confidence": 0, "entry_trigger": 0, "stop_level": 0,
-            "target_level": 0, "event_risk": True, "key_risks": []}
+            "target_level": 0, "event_risk": True, "watch_above": 0, "watch_below": 0, "key_risks": []}
 
 
 def _why(e):
@@ -107,14 +112,17 @@ class Analyst:
             return f"(news unavailable: {_why(e)})", []
         return "", []
 
-    def decide(self, commodity, tech, trade_future, trade_future_price, news, now_text):
-        """Returns (decision_dict, raw_text). NO_TRADE on any problem."""
+    def decide(self, commodity, tech, trade_future, trade_future_price, news, now_text, update=""):
+        """Returns (decision_dict, raw_text). NO_TRADE on any problem.
+
+        `update` describes what changed since an earlier decision tonight (used for the re-check)."""
         prompt = (
             f"Time now: {now_text} IST. Commodity: {commodity}.\n"
             f"TRADING futures contract: {trade_future} at {trade_future_price}.\n"
             f"Price data (from the most liquid exchange, may differ slightly in level):\n"
             f"{json.dumps(tech, indent=1)}\n\nNews brief:\n{news or '(no news available)'}\n\n"
-            "Return your decision.")
+            + (f"Update since your earlier decision tonight:\n{update}\n\n" if update else "")
+            + "Return your decision.")
         try:
             r = self._create(
                 max_tokens=16000, system=DECISION_SYSTEM,
@@ -127,6 +135,8 @@ class Analyst:
             return dict(NO_TRADE, reasoning=f"AI stopped: {r.stop_reason}"), raw
         try:
             d = json.loads(raw)
+            d.setdefault("watch_above", 0)  # optional extras: no levels means nothing to watch
+            d.setdefault("watch_below", 0)
             if set(DECISION_SCHEMA["required"]) - set(d):
                 raise ValueError("missing fields")
             return d, raw
