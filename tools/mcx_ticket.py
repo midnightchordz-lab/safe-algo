@@ -1,6 +1,6 @@
 """Manual MCX option order ticket. YOU confirm every order; nothing is sent without typing YES.
 
-  python3 -m tools.mcx_ticket search CRUDEOILM CE          # list contracts + live premium
+  python3 -m tools.mcx_ticket search CRUDEOILM CE --around 5900   # strikes nearest 5900, live premium
   python3 -m tools.mcx_ticket buy "<TRADING SYMBOL>" --lots 1 --budget 5000 --sl 40
   python3 -m tools.mcx_ticket exit "<TRADING SYMBOL>" --lots 1
 
@@ -77,6 +77,11 @@ def confirm(prompt):
 def cmd_search(args):
     words = [w.upper() for w in args.words]
     found = [r for r in options() if all(w in r.get("trading_symbol", "").upper() for w in words)]
+    if args.around:
+        nearest = min((r.get("expiry") or 0) for r in found) if found else 0
+        found = [r for r in found if (r.get("expiry") or 0) == nearest] if not args.all_expiries else found
+        found.sort(key=lambda r: abs((r.get("strike_price") or 0) - args.around))
+        found = found[: args.limit if args.limit != 40 else 12]
     found.sort(key=lambda r: (r.get("expiry") or 0, r.get("strike_price") or 0))
     found = found[: args.limit]
     if not found:
@@ -215,6 +220,8 @@ def main():
     s = sub.add_parser("search")
     s.add_argument("words", nargs="+")
     s.add_argument("--limit", type=int, default=40)
+    s.add_argument("--around", type=float, help="show the strikes nearest this price (e.g. the futures price)")
+    s.add_argument("--all-expiries", action="store_true", help="with --around: include later expiries too")
     b = sub.add_parser("buy")
     b.add_argument("symbol")
     b.add_argument("--lots", type=int, default=1)
