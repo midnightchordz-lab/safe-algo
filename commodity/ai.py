@@ -32,11 +32,16 @@ DECISION_SYSTEM = (
     "futures level that must be crossed to confirm the move (below current price for DOWN, above "
     "for UP); stop_level invalidates the idea; target_level is a realistic take-profit for tonight. "
     "Set event_risk true if a scheduled release or announcement could whipsaw price tonight. "
-    "watch_above / watch_below: the NEAREST trading-futures levels (within half of the typical daily "
-    "move, ATR, of the current price) whose break later tonight would be worth a second look: a "
-    "breakout above, a breakdown below, e.g. the last hours' high/low or the session average. Not "
-    "the day's extremes. The bot only watches them when it does not trade on this decision."
+    "Whatever your direction, also pre-commit two conditional plans for later tonight. up_*: if the "
+    "trading futures later trade through up_trigger (above the current price), buy a call with stop "
+    "up_stop and target up_target; up_confidence is your honest probability, given that break, that "
+    "target comes before stop. down_*: the same for a put below down_trigger. Use the nearest "
+    "meaningful levels (within half the typical daily move, ATR), not the day's extremes. The bot "
+    "executes a plan automatically when its trigger breaks and will NOT ask you again, so give only "
+    "plans you would stand behind; set all four fields of a side to 0 if you have none."
 )
+
+PLAN_FIELDS = [f"{side}_{f}" for side in ("up", "down") for f in ("trigger", "stop", "target", "confidence")]
 
 DECISION_SCHEMA = {
     "type": "object",
@@ -47,18 +52,24 @@ DECISION_SCHEMA = {
         "stop_level": {"type": "number"},
         "target_level": {"type": "number"},
         "event_risk": {"type": "boolean"},
-        "watch_above": {"type": "number"},
-        "watch_below": {"type": "number"},
+        "up_trigger": {"type": "number"},
+        "up_stop": {"type": "number"},
+        "up_target": {"type": "number"},
+        "up_confidence": {"type": "integer"},
+        "down_trigger": {"type": "number"},
+        "down_stop": {"type": "number"},
+        "down_target": {"type": "number"},
+        "down_confidence": {"type": "integer"},
         "reasoning": {"type": "string"},
         "key_risks": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["direction", "confidence", "entry_trigger", "stop_level", "target_level",
-                 "event_risk", "watch_above", "watch_below", "reasoning", "key_risks"],
+                 "event_risk", *PLAN_FIELDS, "reasoning", "key_risks"],
     "additionalProperties": False,
 }
 
 NO_TRADE = {"direction": "NO_TRADE", "confidence": 0, "entry_trigger": 0, "stop_level": 0,
-            "target_level": 0, "event_risk": True, "watch_above": 0, "watch_below": 0, "key_risks": []}
+            "target_level": 0, "event_risk": True, "key_risks": [], **{k: 0 for k in PLAN_FIELDS}}
 
 
 def _why(e):
@@ -113,16 +124,13 @@ class Analyst:
             return f"(news unavailable: {_why(e)})", []
         return "", []
 
-    def decide(self, commodity, tech, trade_future, trade_future_price, news, now_text, update=""):
-        """Returns (decision_dict, raw_text). NO_TRADE on any problem.
-
-        `update` describes what changed since an earlier decision tonight (used for the re-check)."""
+    def decide(self, commodity, tech, trade_future, trade_future_price, news, now_text):
+        """Returns (decision_dict, raw_text). NO_TRADE on any problem."""
         prompt = (
             f"Time now: {now_text} IST. Commodity: {commodity}.\n"
             f"TRADING futures contract: {trade_future} at {trade_future_price}.\n"
             f"Price data (from the most liquid exchange, may differ slightly in level):\n"
             f"{json.dumps(tech, indent=1)}\n\nNews brief:\n{news or '(no news available)'}\n\n"
-            + (f"Update since your earlier decision tonight:\n{update}\n\n" if update else "")
             + "Return your decision.")
         try:
             r = self._create(
@@ -136,8 +144,8 @@ class Analyst:
             return dict(NO_TRADE, reasoning=f"AI stopped: {r.stop_reason}"), raw
         try:
             d = json.loads(raw)
-            d.setdefault("watch_above", 0)  # optional extras: no levels means nothing to watch
-            d.setdefault("watch_below", 0)
+            for k in PLAN_FIELDS:  # optional extras: no plan means nothing to watch
+                d.setdefault(k, 0)
             if set(DECISION_SCHEMA["required"]) - set(d):
                 raise ValueError("missing fields")
             return d, raw

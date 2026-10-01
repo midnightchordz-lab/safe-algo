@@ -48,26 +48,24 @@ def triggered(side, price, level):
     return price >= level if side == "UP" else price <= level
 
 
-def watch_levels(d, price, atr, reach=0.5):
-    """Breakout levels to watch after a no-trade decision, kept near the price: a level that is
-    missing, on the wrong side or further than `reach` x the daily move becomes price +/- reach x ATR.
-    A failed AI call (confidence 0) watches nothing."""
-    if not d.get("confidence") or not atr:
-        return 0.0, 0.0
-    near = reach * atr
-    above, below = float(d.get("watch_above") or 0), float(d.get("watch_below") or 0)
-    above = above if price < above <= price + near else round(price + near, 1)
-    below = below if price - near <= below < price else round(price - near, 1)
-    return above, below
+def plans(d, price):
+    """The AI's pre-committed conditional plans (call above / put below), as decisions the bot can
+    execute later without asking again. Sides with no plan, or a trigger already crossed, are dropped."""
+    out = []
+    for side, key in (("UP", "up"), ("DOWN", "down")):
+        trig, stop, target = (float(d.get(f"{key}_{f}") or 0) for f in ("trigger", "stop", "target"))
+        ahead = trig > price if side == "UP" else 0 < trig < price
+        if trig and stop and target and ahead:
+            out.append({"direction": side, "confidence": int(d.get(f"{key}_confidence") or 0),
+                        "entry_trigger": trig, "stop_level": stop, "target_level": target,
+                        "event_risk": bool(d.get("event_risk")), "reasoning": d.get("reasoning", "")})
+    return out
 
 
-def broke(price, above, below):
-    """'above' / 'below' when price crosses a watched level, else None."""
-    if above and price >= above:
-        return "above"
-    if below and price <= below:
-        return "below"
-    return None
+def describe(plan):
+    kind = "CALL above" if plan["direction"] == "UP" else "PUT below"
+    return (f"{kind} {plan['entry_trigger']:g} (stop {plan['stop_level']:g}, target {plan['target_level']:g}, "
+            f"{plan['confidence']}%)")
 
 
 def spread_ok(bid, ask, cfg):

@@ -8,9 +8,10 @@ Flow: price data + live news (Claude) -> decision -> hard rules -> wait for the 
 buy 1 lot of the at-the-money option -> exchange stop-loss -> watch every 30s -> exit at
 target / stop / 22:45. Every decision is appended to commodity_decisions.jsonl for review.
 
-If the first decision doesn't trade, the bot watches the breakout levels Claude named
-(watch_above / watch_below) until 21:30. If one breaks, Claude is asked once more with fresh
-price data, and that answer goes through the same hard rules. At most one re-check per night.
+Claude also pre-commits two conditional plans (a call above one level, a put below another). If
+the first decision doesn't trade, the bot arms the plans that pass the hard rules and watches until
+21:30. When a trigger breaks (held for two checks in a row) and the rules still pass on fresh data,
+it executes that plan as committed: no second AI call, so the levels never shift.
 """
 import json
 import logging
@@ -172,17 +173,16 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
     analyst = analyst or Analyst(cfg)
     news, sources = analyst.news_brief(cfg.underlying)
 
-    def decide(px, update=""):
+    def decide(px):
         t = market.technicals(up, data_fut)
-        kw = {"update": update} if update else {}
         d, _ = analyst.decide(cfg.underlying, t, trade_fut["trading_symbol"], px, news,
-                              now().strftime("%d-%b-%Y %H:%M"), **kw)
+                              now().strftime("%d-%b-%Y %H:%M"))
         good, note = engine.validate(d, t["price"], t["atr14"], (t.get("today") or {}).get("avg"), cfg)
         with open(cfg.decisions_file, "a") as f:
-            f.write(json.dumps({"time": now().isoformat(), "mode": mode, "recheck": bool(update), "tech": t,
+            f.write(json.dumps({"time": now().isoformat(), "mode": mode, "tech": t,
                                 "trade_future": px, "news": news, "sources": sources, "decision": d,
                                 "passed_rules": good, "rule_note": note}) + "\n")
-        text = (f"AI{' re-check' if update else ''}: {d['direction']} ({d.get('confidence')}%) "
+        text = (f"AI: {d['direction']} ({d.get('confidence')}%) "
                 f"entry {d.get('entry_trigger')} stop {d.get('stop_level')} target {d.get('target_level')}")
         log.info("%s | rules: %s", text, note)
         log.info("Reasoning: %s", d.get("reasoning", ""))
@@ -194,35 +194,48 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
               f"Hard rules: {'PASS' if ok else 'BLOCK'} ({why})")
         return 0
     if not ok:
-        above, below = engine.watch_levels(decision, fut_price, tech["atr14"])
+        # Arm the pre-committed plans that pass the rules (price vs today's average is re-checked at the break).
+        armed = []
+        for p in engine.plans(decision, fut_price):
+            good, note = engine.validate(p, p["entry_trigger"], tech["atr14"], None, cfg)
+            log.info("Plan %s: %s", engine.describe(p), "armed" if good else f"skipped ({note})")
+            if good:
+                armed.append(p)
         end = cfg.entry_window[1]
-        if not (above or below):
-            notify(f"Commodity: no trade tonight. {summary}. Rule: {why}")
+        if not armed:
+            notify(f"Commodity: no trade tonight. {summary}. Rule: {why}. No conditional plan passed the rules.")
             save_state(cfg, state)
             return 0
-        levels = " / ".join(x for x in (f"above {above:g}" if above else "", f"below {below:g}" if below else "") if x)
-        notify(f"Commodity: no trade yet ({why}). Watching {levels} until {end}.")
-        while True:
+        notify(f"Commodity: no trade yet ({why}). Armed until {end}: "
+               f"{' / '.join(engine.describe(p) for p in armed)}.")
+        held = {id(p): 0 for p in armed}
+        decision = None
+        while decision is None:
             fut_price = broker.price(fut_key) or fut_price
-            way = engine.broke(fut_price, above, below)
-            if way:
+            for p in list(armed):
+                held[id(p)] = held[id(p)] + 1 if engine.triggered(p["direction"], fut_price, p["entry_trigger"]) else 0
+                if held[id(p)] < 2:  # must hold beyond the trigger for two checks in a row, not just poke it
+                    continue
+                t = market.technicals(up, data_fut)
+                good, note = engine.validate(p, t["price"], t["atr14"], (t.get("today") or {}).get("avg"), cfg)
+                log.info("Futures %.2f broke %s | rules now: %s", fut_price, engine.describe(p), note)
+                if good:
+                    decision, tech = p, t
+                    break
+                notify(f"Commodity: {engine.describe(p)} triggered, but a rule blocks it now: {note}.")
+                armed.remove(p)
+            if decision is not None:
                 break
-            if now().strftime("%H:%M") >= end:
-                notify(f"Commodity: no breakout ({levels}) by {end}. No trade tonight.")
+            if not armed:
                 save_state(cfg, state)
                 return 0
-            status(f"crude {fut_price:,.1f}, watching {levels} until {end}")
+            if now().strftime("%H:%M") >= end:
+                notify(f"Commodity: no plan triggered by {end}. No trade tonight.")
+                save_state(cfg, state)
+                return 0
+            status(f"crude {fut_price:,.1f}, armed: {' / '.join(engine.describe(p) for p in armed)} until {end}")
             sleep(cfg.poll_seconds)
-        level = above if way == "above" else below
-        log.info("Futures %.2f broke %s %g; asking the AI again.", fut_price, way, level)
-        decision, ok, why, summary, fut_price, tech = decide(fut_price,
-            f"At {now().strftime('%H:%M')} the futures broke {way} {level:g} (now {fut_price}). "
-            f"Your earlier call: {decision['direction']} ({decision.get('confidence')}%): "
-            f"{decision.get('reasoning', '')}\nIs this a real move worth trading now, or a fake-out?")
-        if not ok:
-            notify(f"Commodity: broke {way} {level:g}, but re-check says no trade. {summary}. Rule: {why}")
-            save_state(cfg, state)
-            return 0
+        notify(f"Commodity: executing pre-committed plan {engine.describe(decision)}.")
 
     # Wait for the entry level, giving up if the stop side breaks first or the window closes.
     side = decision["direction"]
