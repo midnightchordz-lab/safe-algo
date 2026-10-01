@@ -260,9 +260,17 @@ def cmd_exit(args):
 
 
 def cmd_analyze(args):
-    """Read-only market read on the nearest futures contract (daily trend + today's 15-minute action)."""
+    """Read-only market read on a futures contract (daily trend + today's 15-minute action).
+
+    Uses MCX data by default (much longer history than NSE commodities); reading MCX data works
+    even while Upstox blocks MCX orders.
+    """
+    global EXCHANGE
     from swing.indicators import atr, ema
     from upstox_api import API, Candle
+    if EXCHANGE == "NSE" and not args.same_exchange:
+        EXCHANGE = "MCX"
+        _ROWS.clear()
     futs = [r for r in mcx_rows() if r.get("instrument_type") == "FUT"
             and r.get("trading_symbol", "").upper().split(" ")[0] == args.name.upper()]
     futs.sort(key=lambda r: r.get("expiry") or 0)
@@ -280,12 +288,15 @@ def cmd_analyze(args):
     except UpstoxError:
         intra = []
     ltp = up.ltp([key]).get(key) or (intra[-1].close if intra else daily[-1].close)
-    if len(daily) < 60:
+    if len(daily) < 15:
         sys.exit(f"Only {len(daily)} daily candles available; not enough history for a read.")
     closes = [c.close for c in daily]
     if daily[-1].date != to.isoformat():
         closes.append(ltp)
-    e20, e50 = ema(closes, 20)[-1], ema(closes, 50)[-1]
+    fast, slow = (20, 50) if len(closes) >= 60 else (5, 10) if len(closes) < 25 else (10, 20)
+    if (fast, slow) != (20, 50):
+        print(f"Note: only {len(daily)} days of history, so using {fast}/{slow}-day averages.")
+    e20, e50 = ema(closes, fast)[-1], ema(closes, slow)[-1]
     a14 = atr(daily, 14)[-1]
     gains = [max(closes[i] - closes[i - 1], 0) for i in range(len(closes) - 14, len(closes))]
     losses = [max(closes[i - 1] - closes[i], 0) for i in range(len(closes) - 14, len(closes))]
@@ -297,10 +308,13 @@ def cmd_analyze(args):
 
     print(f"\n===== {fut['trading_symbol']} ({EXCHANGE}) read at {datetime.now(IST):%d-%b %H:%M} =====")
     print(f"Price now          : {ltp:,.2f}")
-    print(f"vs 20-day avg      : {e20:,.2f}  ({pct(ltp, e20):+.2f}%)")
-    print(f"vs 50-day avg      : {e50:,.2f}  ({pct(ltp, e50):+.2f}%)")
-    print(f"5-day / 20-day move: {pct(ltp, closes[-6]):+.2f}% / {pct(ltp, closes[-21]):+.2f}%")
-    print(f"20-day range       : {lo20:,.2f} - {hi20:,.2f}  (price at {100 * (ltp - lo20) / max(hi20 - lo20, 1e-9):.0f}% of range)")
+    print(f"vs {fast}-day avg      : {e20:,.2f}  ({pct(ltp, e20):+.2f}%)")
+    print(f"vs {slow}-day avg      : {e50:,.2f}  ({pct(ltp, e50):+.2f}%)")
+    back = min(20, len(closes) - 1)
+    print(f"5-day / {back}-day move: {pct(ltp, closes[-6]):+.2f}% / {pct(ltp, closes[-1 - back]):+.2f}%")
+    print(f"{min(20, len(daily))}-day range       : {lo20:,.2f} - {hi20:,.2f}  "
+          f"(price at {100 * (ltp - lo20) / max(hi20 - lo20, 1e-9):.0f}% of range)")
+    print(f"History used       : {len(daily)} daily candles from {daily[0].date}")
     print(f"RSI(14, daily)     : {rsi:.0f}")
     print(f"Typical daily move : ±{a14:,.0f} ({100 * a14 / ltp:.1f}%)")
     exp = futs[0].get("expiry")
@@ -337,6 +351,7 @@ def main():
     b.add_argument("--sl", type=float, default=40, help="stop-loss %% below fill price")
     an = sub.add_parser("analyze")
     an.add_argument("name", nargs="?", default="CRUDEOIL")
+    an.add_argument("--same-exchange", action="store_true", help="analyze NSE data instead of MCX's longer history")
     e = sub.add_parser("exit")
     e.add_argument("symbol")
     e.add_argument("--lots", type=int, default=1)
