@@ -8,6 +8,7 @@ Written to work on both the 0.x SDK (what pip installs on Python 3.9) and 1.x: n
 fields are passed through `extra_body` / `extra_headers`.
 """
 import json
+import os
 
 import anthropic
 
@@ -82,9 +83,12 @@ class Analyst:
         extra_body = kwargs.pop("extra_body", {})
         extra_body.setdefault("output_config", {})["effort"] = self.cfg.effort
         extra_body["fallbacks"] = "default"
+        headers = {"anthropic-beta": FALLBACK_BETA}
+        workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID", "")
+        if workspace:  # needed when the API key is user-level rather than workspace-scoped
+            headers["anthropic-workspace-id"] = workspace
         return self.client.messages.create(
-            model=self.cfg.model, extra_body=extra_body,
-            extra_headers={"anthropic-beta": FALLBACK_BETA}, **kwargs)
+            model=self.cfg.model, extra_body=extra_body, extra_headers=headers, **kwargs)
 
     def news_brief(self, commodity):
         """Returns (brief_text, source_urls). Empty brief on failure."""

@@ -65,6 +65,7 @@ def install(live, swing_live, commodity_live=False, commodity_budget="0", commod
         sys.exit("--commodity-live needs ANTHROPIC_API_KEY set in this Terminal and --commodity-budget N.")
     envfile.save({"UPSTOX_API_KEY": key, "UPSTOX_API_SECRET": secret, "ALGO_LIVE": "1" if live else "0",
                   "SWING_LIVE": "1" if swing_live else "0", "ANTHROPIC_API_KEY": anthropic_key,
+                  "ANTHROPIC_WORKSPACE_ID": os.environ.get("ANTHROPIC_WORKSPACE_ID", ""),
                   "COMMODITY_LIVE": "1" if commodity_live else "0", "COMMODITY_MAX_PREMIUM": commodity_budget,
                   "COMMODITY_MAX_TOTAL_LOSS": commodity_max_loss})
 
