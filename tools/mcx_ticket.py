@@ -1,6 +1,6 @@
 """Manual MCX option order ticket. YOU confirm every order; nothing is sent without typing YES.
 
-  python3 -m tools.mcx_ticket search CRUDEOILM CE --around 5900   # strikes nearest 5900, live premium
+  python3 -m tools.mcx_ticket search CRUDEOILM CE    # finds the futures price itself, shows nearby strikes
   python3 -m tools.mcx_ticket buy "<TRADING SYMBOL>" --lots 1 --budget 5000 --sl 40
   python3 -m tools.mcx_ticket exit "<TRADING SYMBOL>" --lots 1
 
@@ -50,10 +50,30 @@ def api():
         return Upstox(f.read().strip())
 
 
+_ROWS = []
+
+
+def mcx_rows():
+    if not _ROWS:
+        raw = requests.get(MCX_URL, timeout=30).content
+        _ROWS.extend(json.load(gzip.GzipFile(fileobj=io.BytesIO(raw))))
+    return _ROWS
+
+
 def options():
-    raw = requests.get(MCX_URL, timeout=30).content
-    rows = json.load(gzip.GzipFile(fileobj=io.BytesIO(raw)))
-    return [r for r in rows if r.get("segment") == "MCX_FO" and r.get("instrument_type") in ("CE", "PE")]
+    return [r for r in mcx_rows() if r.get("segment") == "MCX_FO" and r.get("instrument_type") in ("CE", "PE")]
+
+
+def futures_price(name, up):
+    """Live price of the nearest-expiry future whose symbol starts with `name` (e.g. CRUDEOILM)."""
+    futs = [r for r in mcx_rows() if r.get("segment") == "MCX_FO" and r.get("instrument_type") == "FUT"
+            and r.get("trading_symbol", "").upper().split(" ")[0] == name.upper()]
+    futs.sort(key=lambda r: r.get("expiry") or 0)
+    for r in futs[:2]:
+        p = up.ltp([r["instrument_key"]]).get(r["instrument_key"])
+        if p:
+            return r["trading_symbol"], p
+    return None, None
 
 
 def expiry_of(rec):
@@ -77,6 +97,13 @@ def confirm(prompt):
 def cmd_search(args):
     words = [w.upper() for w in args.words]
     found = [r for r in options() if all(w in r.get("trading_symbol", "").upper() for w in words)]
+    if not args.around and found:
+        fut, px = futures_price(words[0], api())
+        if px:
+            print(f"Futures {fut}: ₹{px:,.2f}  <- check this matches the Upstox app")
+            args.around = px
+        else:
+            print("Couldn't read the futures price; showing contracts from the lowest strike.")
     if args.around:
         nearest = min((r.get("expiry") or 0) for r in found) if found else 0
         found = [r for r in found if (r.get("expiry") or 0) == nearest] if not args.all_expiries else found
