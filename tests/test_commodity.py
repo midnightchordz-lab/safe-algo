@@ -32,11 +32,22 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(engine.validate(DOWN, 8800, 380, 8820, self.cfg), (True, "ok"))
 
     def test_low_confidence_rejected(self):
-        self.assertFalse(engine.validate(dict(DOWN, confidence=60), 8800, 380, 8820, self.cfg)[0])
+        self.assertFalse(engine.validate(dict(DOWN, confidence=49), 8800, 380, 8820, self.cfg)[0])
 
-    def test_min_confidence_cannot_go_below_60(self):
-        with mock.patch.dict(os.environ, {"COMMODITY_MIN_CONFIDENCE": "20"}):
-            self.assertEqual(CommodityConfig().min_confidence, 60)
+    def test_edge_rule(self):
+        # 54% to win 160 vs lose 95: edge 86.4 - 43.7 = 42.7 pts >= 0.25 x 95.
+        put = dict(DOWN, confidence=54, entry_trigger=8760, stop_level=8855, target_level=8600)
+        self.assertEqual(engine.validate(put, 8800, 380, 8820, self.cfg), (True, "ok"))
+        # A stricter edge setting blocks the same plan, and reports why.
+        with mock.patch.dict(os.environ, {"COMMODITY_MIN_EDGE": "0.5"}):
+            ok, why = engine.validate(put, 8800, 380, 8820, CommodityConfig())
+        self.assertFalse(ok)
+        self.assertIn("edge 43 pts < 0.5", why)
+
+    def test_thresholds_cannot_be_loosened(self):
+        with mock.patch.dict(os.environ, {"COMMODITY_MIN_CONFIDENCE": "20", "COMMODITY_MIN_EDGE": "0"}):
+            cfg = CommodityConfig()
+        self.assertEqual((cfg.min_confidence, cfg.min_edge), (50, 0.25))
 
     def test_event_risk_rejected(self):
         self.assertFalse(engine.validate(dict(DOWN, event_risk=True), 8800, 380, 8820, self.cfg)[0])
@@ -237,7 +248,7 @@ class BotTests(unittest.TestCase):
         self.assertTrue(any("No conditional plan passed" in n for n in notes))
 
     def test_plan_failing_rules_not_armed(self):
-        weak = dict(NO_TRADE_PLANS, up_confidence=60, down_target=8700)  # low confidence / poor reward
+        weak = dict(NO_TRADE_PLANS, up_confidence=45, down_target=8700)  # low confidence / poor reward
         rc, orders, notes, st = self.run_evening(True, [8800, 8700, 8700, 8700], decision=weak)
         self.assertEqual(orders, [])
         self.assertTrue(any("No conditional plan passed" in n for n in notes))

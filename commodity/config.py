@@ -30,7 +30,10 @@ class CommodityConfig:
     lots: int = 1                          # hard-coded: one lot per trade
 
     # --- Decision rules applied on top of the AI ---
-    min_confidence: int = env("COMMODITY_MIN_CONFIDENCE", 65, int)  # clamped to >= 60 in __post_init__
+    # Edge rule: the AI's win probability must be >= min_confidence AND the expected result
+    # (p x reward - (1-p) x risk, in futures points) must be >= min_edge x risk.
+    min_confidence: int = env("COMMODITY_MIN_CONFIDENCE", 50, int)  # clamped to >= 50 in __post_init__
+    min_edge: float = env("COMMODITY_MIN_EDGE", 0.25, float)          # clamped to >= 0.25
     min_reward_risk: float = 1.5           # target at least 1.5x the stop distance (futures points)
     stop_atr_range: tuple = (0.25, 1.5)    # stop distance must be 0.25-1.5x the typical daily move
     max_premium_loss_pct: float = 0.40     # option stop never more than 40% below the fill
@@ -57,5 +60,6 @@ class CommodityConfig:
     halt_file: str = os.path.join(HERE, "COMMODITY_HALTED")
 
     def __post_init__(self):
-        self.min_confidence = max(60, int(self.min_confidence))
+        self.min_confidence = max(50, int(self.min_confidence))
+        self.min_edge = max(0.25, float(self.min_edge))
         self.lots = 1

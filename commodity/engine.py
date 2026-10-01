@@ -39,6 +39,10 @@ def validate(d, price, atr, today_avg, cfg):
         return False, f"stop distance {risk:.0f} outside {lo}-{hi} x daily move ({atr:.0f})"
     if reward < cfg.min_reward_risk * risk:
         return False, f"reward {reward:.0f} < {cfg.min_reward_risk} x risk {risk:.0f}"
+    p = d["confidence"] / 100
+    edge = p * reward - (1 - p) * risk
+    if edge < cfg.min_edge * risk:
+        return False, f"edge {edge:.0f} pts < {cfg.min_edge} x risk {risk:.0f} (win {d['confidence']}%)"
     if today_avg is not None and sign * (price - today_avg) < 0:
         return False, f"price data disagrees: price {'below' if side == 'UP' else 'above'} today's average"
     return True, "ok"
