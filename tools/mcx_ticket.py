@@ -3,6 +3,7 @@ YOU confirm every order; nothing is sent without typing YES.
 
   python3 -m tools.mcx_ticket search CRUDEOIL PE     # NSE commodities: futures price + nearby strikes
   python3 -m tools.mcx_ticket --exchange MCX search CRUDEOILM PE
+  python3 -m tools.mcx_ticket analyze CRUDEOIL      # read-only trend/momentum read on the futures
   python3 -m tools.mcx_ticket buy "<TRADING SYMBOL>" --lots 1 --budget 5000 --sl 40
   python3 -m tools.mcx_ticket exit "<TRADING SYMBOL>" --lots 1
 
@@ -258,6 +259,67 @@ def cmd_exit(args):
         f"avg=₹{float(d.get('average_price') or 0):.2f}")
 
 
+def cmd_analyze(args):
+    """Read-only market read on the nearest futures contract (daily trend + today's 15-minute action)."""
+    from swing.indicators import atr, ema
+    from upstox_api import API, Candle
+    futs = [r for r in mcx_rows() if r.get("instrument_type") == "FUT"
+            and r.get("trading_symbol", "").upper().split(" ")[0] == args.name.upper()]
+    futs.sort(key=lambda r: r.get("expiry") or 0)
+    if not futs:
+        sys.exit(f"No {args.name} futures found on {EXCHANGE}.")
+    fut = futs[0]
+    up, key = api(), fut["instrument_key"]
+    to = datetime.now(IST).date()
+    frm = to.replace(year=to.year - 1)
+    rows = up._req("GET", f"{API}/v3/historical-candle/{key}/days/1/{to.isoformat()}/{frm.isoformat()}")["candles"]
+    daily = [Candle(c[0][:10], c[1], c[2], c[3], c[4], c[5]) for c in sorted(rows, key=lambda c: c[0])]
+    try:
+        intra = up._req("GET", f"{API}/v3/historical-candle/intraday/{key}/minutes/15")["candles"]
+        intra = [Candle(c[0][11:16], c[1], c[2], c[3], c[4], c[5]) for c in sorted(intra, key=lambda c: c[0])]
+    except UpstoxError:
+        intra = []
+    ltp = up.ltp([key]).get(key) or (intra[-1].close if intra else daily[-1].close)
+    if len(daily) < 60:
+        sys.exit(f"Only {len(daily)} daily candles available; not enough history for a read.")
+    closes = [c.close for c in daily]
+    if daily[-1].date != to.isoformat():
+        closes.append(ltp)
+    e20, e50 = ema(closes, 20)[-1], ema(closes, 50)[-1]
+    a14 = atr(daily, 14)[-1]
+    gains = [max(closes[i] - closes[i - 1], 0) for i in range(len(closes) - 14, len(closes))]
+    losses = [max(closes[i - 1] - closes[i], 0) for i in range(len(closes) - 14, len(closes))]
+    rsi = 100 - 100 / (1 + (sum(gains) / max(sum(losses), 1e-9)))
+    hi20, lo20 = max(c.high for c in daily[-20:]), min(c.low for c in daily[-20:])
+
+    def pct(a, b):
+        return (a / b - 1) * 100
+
+    print(f"\n===== {fut['trading_symbol']} ({EXCHANGE}) read at {datetime.now(IST):%d-%b %H:%M} =====")
+    print(f"Price now          : {ltp:,.2f}")
+    print(f"vs 20-day avg      : {e20:,.2f}  ({pct(ltp, e20):+.2f}%)")
+    print(f"vs 50-day avg      : {e50:,.2f}  ({pct(ltp, e50):+.2f}%)")
+    print(f"5-day / 20-day move: {pct(ltp, closes[-6]):+.2f}% / {pct(ltp, closes[-21]):+.2f}%")
+    print(f"20-day range       : {lo20:,.2f} - {hi20:,.2f}  (price at {100 * (ltp - lo20) / max(hi20 - lo20, 1e-9):.0f}% of range)")
+    print(f"RSI(14, daily)     : {rsi:.0f}")
+    print(f"Typical daily move : ±{a14:,.0f} ({100 * a14 / ltp:.1f}%)")
+    exp = futs[0].get("expiry")
+    if exp:
+        days = max((datetime.fromtimestamp(exp / 1000, IST).date() - to).days, 1)
+        print(f"Typical move by {datetime.fromtimestamp(exp / 1000, IST):%d-%b} : about ±{a14 * days ** 0.5 * 0.8:,.0f}")
+    if intra:
+        d_open, d_hi, d_lo = intra[0].open, max(c.high for c in intra), min(c.low for c in intra)
+        avg = sum(c.close for c in intra) / len(intra)
+        last4 = [c.close for c in intra[-4:]]
+        print(f"Today              : open {d_open:,.2f}, high {d_hi:,.2f}, low {d_lo:,.2f}  "
+              f"({pct(ltp, d_open):+.2f}% vs open)")
+        print(f"Today's avg price  : {avg:,.2f}  (price {'above' if ltp > avg else 'below'} it)")
+        print(f"Last hour (15m)    : {' -> '.join(f'{x:,.0f}' for x in last4)}")
+    else:
+        print("Today's 15-minute candles not available.")
+    print("==========================================================")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--exchange", choices=("NSE", "MCX"), default="NSE",
@@ -273,13 +335,15 @@ def main():
     b.add_argument("--lots", type=int, default=1)
     b.add_argument("--budget", type=float, default=5000)
     b.add_argument("--sl", type=float, default=40, help="stop-loss %% below fill price")
+    an = sub.add_parser("analyze")
+    an.add_argument("name", nargs="?", default="CRUDEOIL")
     e = sub.add_parser("exit")
     e.add_argument("symbol")
     e.add_argument("--lots", type=int, default=1)
     args = ap.parse_args()
     global EXCHANGE
     EXCHANGE = args.exchange
-    {"search": cmd_search, "buy": cmd_buy, "exit": cmd_exit}[args.cmd](args)
+    {"search": cmd_search, "buy": cmd_buy, "exit": cmd_exit, "analyze": cmd_analyze}[args.cmd](args)
 
 
 if __name__ == "__main__":
