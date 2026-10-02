@@ -3,10 +3,14 @@
   python3 -m commodity.bot             # PAPER unless COMMODITY_LIVE=1
   python3 -m commodity.bot --resume    # clear a halt after reviewing it
   python3 -m commodity.bot --decide-only   # just show tonight's data + news + AI call, then stop
+  python3 -m commodity.bot --fresh         # ignore tonight's saved plan and ask the AI again
 
 Flow: price data + live news (Claude) -> decision -> hard rules -> wait for the entry level ->
 buy 1 lot of the at-the-money option -> exchange stop-loss -> watch every 30s -> exit at
 target / stop / 22:45. Every decision is appended to commodity_decisions.jsonl for review.
+
+The night's decision is saved in the state file: a restart the same evening reuses it (no new AI
+call, same levels) unless --fresh is given.
 
 Claude also pre-commits two conditional plans (a call above one level, a put below another). If
 the first decision doesn't trade, the bot arms the plans that pass the hard rules and watches until
@@ -170,8 +174,6 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
         log.warning("No live price for %s (market closed or holiday?). No trade.", trade_fut["trading_symbol"])
         return 0
 
-    analyst = analyst or Analyst(cfg)
-    news, sources = analyst.news_brief(cfg.underlying)
 
     def decide(px):
         t = market.technicals(up, data_fut)
@@ -179,7 +181,7 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
                               now().strftime("%d-%b-%Y %H:%M"))
         good, note = engine.validate(d, t["price"], t["atr14"], (t.get("today") or {}).get("avg"), cfg)
         with open(cfg.decisions_file, "a") as f:
-            f.write(json.dumps({"time": now().isoformat(), "mode": mode, "tech": t,
+            f.write(json.dumps({"time": now().isoformat(), "mode": mode, "trade_key": fut_key, "tech": t,
                                 "trade_future": px, "news": news, "sources": sources, "decision": d,
                                 "passed_rules": good, "rule_note": note}) + "\n")
         text = (f"AI: {d['direction']} ({d.get('confidence')}%) "
@@ -188,7 +190,23 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
         log.info("Reasoning: %s", d.get("reasoning", ""))
         return d, good, note, text, px, t
 
-    decision, ok, why, summary, fut_price, tech = decide(fut_price)
+    saved = state.get("plan") or {}
+    if saved.get("date") == today and not {"--fresh", "--decide-only"} & set(sys.argv):
+        news, sources, decision = saved["news"], saved.get("sources", []), saved["decision"]
+        tech = market.technicals(up, data_fut)
+        ok, why = engine.validate(decision, tech["price"], tech["atr14"], (tech.get("today") or {}).get("avg"), cfg)
+        summary = (f"AI: {decision['direction']} ({decision.get('confidence')}%) entry {decision.get('entry_trigger')} "
+                   f"stop {decision.get('stop_level')} target {decision.get('target_level')}")
+        log.info("Reusing tonight's saved plan from %s (no new AI call). %s | rules: %s",
+                 saved.get("time", "?"), summary, why)
+    else:
+        analyst = analyst or Analyst(cfg)
+        news, sources = analyst.news_brief(cfg.underlying)
+        decision, ok, why, summary, fut_price, tech = decide(fut_price)
+        if "--decide-only" not in sys.argv:
+            state["plan"] = {"date": today, "time": now().strftime("%H:%M"), "decision": decision,
+                             "news": news, "sources": sources}
+            save_state(cfg, state)
     if "--decide-only" in sys.argv:
         print(f"\n--- NEWS BRIEF ---\n{news}\n\n--- DECISION ---\n{json.dumps(decision, indent=1)}\n"
               f"Hard rules: {'PASS' if ok else 'BLOCK'} ({why})")

@@ -135,9 +135,9 @@ class Clock:
 class BotTests(unittest.TestCase):
     """A full evening: entry triggers, price falls to target, exit."""
 
-    def run_evening(self, live, path, decision=DOWN, cap="40000", gap=0.01):
+    def run_evening(self, live, path, decision=DOWN, cap="40000", gap=0.01, tmp=None):
         import commodity.bot as bot
-        tmp = tempfile.mkdtemp()
+        tmp = tmp or tempfile.mkdtemp()
         env = {"COMMODITY_LIVE": "1" if live else "0", "COMMODITY_MAX_PREMIUM": cap}
         exp = int(datetime(2026, 10, 19, tzinfo=IST).timestamp() * 1000)
         rows = [{"instrument_type": "FUT", "trading_symbol": "CRUDEOIL FUT 19 OCT 26", "instrument_key": "F",
@@ -284,10 +284,84 @@ class BotTests(unittest.TestCase):
         self.assertEqual(orders, [])
         self.assertTrue(any("rule blocks it now" in n and "disagrees" in n for n in notes))
 
+    def test_restart_reuses_saved_plan(self):
+        tmp = tempfile.mkdtemp()
+        self.run_evening(True, [8800] * 2000, decision=NO_TRADE_PLANS, tmp=tmp)
+        self.assertEqual(len(self.calls), 1)
+        rc, orders, notes, st = self.run_evening(True, [8800] * 2000, decision=DOWN, tmp=tmp)
+        self.assertEqual(len(self.calls), 0)                   # no new AI call on the restart
+        self.assertTrue(any("Armed until 21:30: CALL above 8858" in n for n in notes))  # same levels as before
+        self.assertEqual(st["plan"]["decision"]["down_trigger"], 8770)
+
     def test_live_requires_cap(self):
         rc, orders, notes, st = self.run_evening(True, [8800], cap="0")
         self.assertEqual(rc, 1)
         self.assertEqual(orders, [])
+
+
+class ScoreTests(unittest.TestCase):
+    """Replaying plans against 15-minute bars."""
+
+    def setUp(self):
+        from commodity import score
+        self.score, self.cfg = score, CommodityConfig()
+        self.put = {"direction": "DOWN", "confidence": 54, "entry_trigger": 8760, "stop_level": 8855,
+                    "target_level": 8600}
+
+    def bars(self, *hlc):
+        t = datetime(2026, 10, 1, 18, 30)
+        out = []
+        for i, (h, lo) in enumerate(hlc):
+            out.append(((t + timedelta(minutes=15 * i)).strftime("%H:%M"), (h + lo) / 2, h, lo, (h + lo) / 2))
+        return out
+
+    def test_target_after_trigger(self):
+        r = self.score.simulate(self.put, self.bars((8800, 8770), (8780, 8750), (8700, 8590)), "18:30", self.cfg)
+        self.assertEqual((r["result"], r["points"]), ("target", 160))
+
+    def test_stop_after_trigger(self):
+        r = self.score.simulate(self.put, self.bars((8780, 8750), (8860, 8800)), "18:30", self.cfg)
+        self.assertEqual((r["result"], r["points"]), ("stop", -95))
+
+    def test_both_in_one_bar_counts_as_stop(self):
+        r = self.score.simulate(self.put, self.bars((8780, 8750), (8870, 8590)), "18:30", self.cfg)
+        self.assertEqual(r["result"], "stop")
+
+    def test_bars_before_decision_ignored_and_no_trigger(self):
+        r = self.score.simulate(self.put, self.bars((8780, 8700), (8800, 8770), (8800, 8770)), "18:50", self.cfg)
+        self.assertEqual(r["result"], "no trigger")
+
+    def test_time_exit(self):
+        bars = self.bars((8780, 8750), *[(8770, 8740)] * 20)   # runs past 22:45 without stop/target
+        r = self.score.simulate(self.put, bars, "18:30", self.cfg)
+        self.assertEqual(r["result"], "time")
+
+    def test_summary_numbers(self):
+        rs = [{"result": "target", "points": 160}, {"result": "stop", "points": -95},
+              {"result": "no trigger", "points": 0}]
+        s = self.score.summarise(rs)
+        self.assertEqual((s["plans"], s["triggered"], s["wins"], s["losses"]), (3, 2, 1, 1))
+        self.assertEqual((s["avg_win"], s["avg_loss"], s["total"]), (7880, -4870, 3010))
+        self.assertEqual(s["profit_factor"], 1.62)
+
+    def test_main_dedupes_restarts_and_skips_tonight(self):
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, "d.jsonl")
+        entry = {"time": "2026-10-01T20:09:10+05:30", "trade_key": "F", "trade_future": 8851,
+                 "tech": {"atr14": 380}, "passed_rules": False, "decision": NO_TRADE_PLANS}
+        with open(path, "w") as f:
+            for e in (entry, dict(entry, time="2026-10-01T20:20:00+05:30"),
+                      dict(entry, time=datetime.now(IST).date().isoformat() + "T19:00:00+05:30")):
+                f.write(json.dumps(e) + "\n")
+        bars = [[f"2026-10-01T{h}:00+05:30", 8800, 8865, 8790, 8860, 0, 0] for h in ("20", "21")]
+        up = types.SimpleNamespace(_req=lambda *a, **k: {"candles": bars})
+        out = []
+        with mock.patch.object(self.score, "CommodityConfig", lambda: CommodityConfig(decisions_file=path)):
+            self.score.main(up=up, out=out.append)
+        plan_lines = [l for l in out if l.startswith("2026-10-01")]
+        self.assertEqual(len(plan_lines), 2)       # call + put once each, despite the restart
+        self.assertTrue(any("CALL above 8858" in l and "[armed]" in l for l in plan_lines))
+        self.assertTrue(any(l.startswith("ARMED only:") for l in out))
 
 
 if __name__ == "__main__":

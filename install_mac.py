@@ -107,6 +107,7 @@ if __name__ == "__main__":
     if "--uninstall" in sys.argv:
         uninstall()
     else:
+        envfile.load()  # keep the saved keys, so re-installing doesn't need them typed into this Terminal
         paper = "--paper" in sys.argv
         install(live=not paper, swing_live="--swing-live" in sys.argv and not paper,
                 commodity_live="--commodity-live" in sys.argv and not paper,
