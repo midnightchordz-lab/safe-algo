@@ -72,5 +72,17 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(sent["Subject"], "Safe-Algo Commodity: Bought 1 lot")
 
 
+class EmailFallbackTests(unittest.TestCase):
+    def test_falls_back_to_starttls_when_ssl_is_cut(self):
+        env = {"SMTP_USER": "me@gmail.com", "SMTP_PASSWORD": "abcdefghijklmnop"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(autorun.smtplib, "SMTP_SSL",
+                                  side_effect=autorun.smtplib.SMTPServerDisconnected("closed")), \
+                mock.patch.object(autorun.smtplib, "SMTP") as plain:
+            self.assertTrue(autorun.send_email("hi"))
+        plain.return_value.starttls.assert_called_once()
+        plain.return_value.__enter__.return_value.send_message.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

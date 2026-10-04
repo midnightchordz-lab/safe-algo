@@ -35,14 +35,27 @@ def send_email(message, title="Safe-Algo"):
     mail["From"], mail["To"] = user, os.environ.get("NOTIFY_EMAIL") or user
     mail["Subject"] = f"{title}: {message[:70]}"
     mail.set_content(message)
-    try:
-        with smtplib.SMTP_SSL(os.environ.get("SMTP_HOST", "smtp.gmail.com"), 465, timeout=30) as smtp:
-            smtp.login(user, password.replace(" ", ""))
-            smtp.send_message(mail)
-        return True
-    except (OSError, smtplib.SMTPException) as e:
-        print(f"[notify] email failed: {e}", flush=True)
-        return False
+    host, errors = os.environ.get("SMTP_HOST", "smtp.gmail.com"), []
+    for port in (465, 587):  # SSL first, then STARTTLS if the first is cut off
+        try:
+            if port == 465:
+                smtp = smtplib.SMTP_SSL(host, port, timeout=30)
+            else:
+                smtp = smtplib.SMTP(host, port, timeout=30)
+                smtp.ehlo()
+                smtp.starttls()
+                smtp.ehlo()
+            with smtp as session:
+                session.login(user, password.replace(" ", ""))
+                session.send_message(mail)
+            return True
+        except smtplib.SMTPAuthenticationError as e:
+            print(f"[notify] email login refused (check the Gmail app password): {e.smtp_code}", flush=True)
+            return False
+        except (OSError, smtplib.SMTPException) as e:
+            errors.append(f"port {port}: {e.__class__.__name__} {e}")
+    print("[notify] email failed: " + " | ".join(errors), flush=True)
+    return False
 
 
 def notify(message, title="Safe-Algo"):
