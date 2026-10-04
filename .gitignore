@@ -17,3 +17,10 @@ commodity_state.json.tmp
 commodity_decisions.jsonl
 commodity.log
 COMMODITY_HALTED
+# every commodity bot's private files (crude, natural gas, future ones)
+commodity*.log
+commodity*_state.json
+commodity*_state.json.tmp
+commodity*_decisions.jsonl
+COMMODITY*_HALTED
+*.log
