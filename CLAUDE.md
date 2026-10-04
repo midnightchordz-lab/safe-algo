@@ -16,7 +16,7 @@ Automated Upstox trading bots for one owner. This repository holds only this pro
 |---|---|---|
 | `bot.py`, `engine.py`, `risk.py`, `strategy.py`, `config.py` | Long-term bot: NIFTYBEES + GOLDBEES 50/50, rebalanced; soft floor ₹8,500 (freeze), hard floor ₹7,000 (sell) | LIVE |
 | `swing/` | Swing bot: Nifty 50 pullbacks, 3:1 reward/risk, broker-held GTT stops | PAPER |
-| `commodity/` | Commodity option bot: CRUDEOIL price data + Claude news read, hard rules, 1 lot, intraday; on no-trade it arms Claude's pre-committed call/put plans and executes one when its level holds for two checks | owner's choice (`install_mac.py --commodity-live`) |
+| `commodity/` | Commodity option bots, one engine run twice: CRUDEOIL (COMMODITY_* settings, commodity_*.json) and NATURALGAS (NATGAS_* settings, commodity_naturalgas_*.json), each with its own live switch, premium cap and loss limit. Price data + Claude news read, hard rules, 1 lot, intraday; on no-trade it arms Claude's pre-committed call/put plans and executes one when its level holds for two checks | owner's choice (`install_mac.py --commodity-live`) |
 | `commodity/score.py` | Replays every logged commodity plan against real 15-minute futures bars: win rate, avg win/loss, profit factor (read-only) | n/a |
 | `tools/mcx_ticket.py` | Manual commodity option ticket; every order needs the owner to type YES | manual |
 | `research/` | Read-only studies (e.g. scalping cost test); never trade | n/a |
@@ -26,7 +26,7 @@ Automated Upstox trading bots for one owner. This repository holds only this pro
 | `upstox_api.py`, `get_token.py`, `envfile.py` | Upstox REST client, daily login, `.env` loader | n/a |
 
 Schedule (IST, Mon-Fri): 09:00 login on the Mac (token copied to the server over SSH), 09:05 server
-token check, 14:50 long-term, 14:57 swing, 18:25 commodity, all on the server. No equity orders after
+token check, 14:50 long-term, 14:57 swing, 18:25 crude, 18:26 natural gas, all on the server. No equity orders after
 15:10 (closing auction session). The server opens no inbound ports except SSH; don't add a public
 login listener without the owner's explicit approval.
 

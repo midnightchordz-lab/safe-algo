@@ -4,6 +4,7 @@
   .venv/bin/python install_linux.py --swing-live  # swing bot LIVE too
   .venv/bin/python install_linux.py --paper       # everything in practice mode
   .venv/bin/python install_linux.py --commodity-live --commodity-budget 32000 --commodity-max-loss 15000
+  .venv/bin/python install_linux.py --natgas-live --natgas-budget 32000 --natgas-max-loss 15000
   .venv/bin/python install_linux.py --test-email  # just send a test email (and save the alert address)
   .venv/bin/python install_linux.py --uninstall
 
@@ -14,7 +15,7 @@ Gmail refuses logins from cloud servers), to an address verified in SES.
 The daily Upstox login happens on the Mac (install_mac.py --server ...), which copies the token here.
 Schedule (cron, server clock must be Asia/Kolkata):
   09:05  check today's token arrived from the Mac; emails a reminder and waits if not
-  14:50  long-term bot   14:57  swing bot   18:25  commodity option bot
+  14:50  long-term bot   14:57  swing bot   18:25  crude oil option bot   18:26  natural gas option bot
 Only lines tagged "# safe-algo" in the crontab are touched, so other bots' lines stay.
 """
 import getpass
@@ -26,7 +27,7 @@ import envfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TAG = "# safe-algo"
-JOBS = [("login", 9, 5), ("trade", 14, 50), ("swing", 14, 57), ("commodity", 18, 25)]
+JOBS = [("login", 9, 5), ("trade", 14, 50), ("swing", 14, 57), ("commodity", 18, 25), ("natgas", 18, 26)]
 SECRETS = {"UPSTOX_API_SECRET", "ANTHROPIC_API_KEY"}
 ASK = [("UPSTOX_API_KEY", "Upstox API key"), ("UPSTOX_API_SECRET", "Upstox API secret"),
        ("ANTHROPIC_API_KEY", "Anthropic API key (for the commodity bot)"),
@@ -118,18 +119,25 @@ def main():
     budget = flag_value("--commodity-budget", "0")
     if commodity_live and float(budget) <= 0:
         sys.exit("--commodity-live needs --commodity-budget N (the max premium for its one lot).")
+    natgas_live = "--natgas-live" in sys.argv and not paper
+    natgas_budget = flag_value("--natgas-budget", "0")
+    if natgas_live and float(natgas_budget) <= 0:
+        sys.exit("--natgas-live needs --natgas-budget N (the max premium for its one lot).")
     values = dict(read_env(), **{k: os.environ.get(k, "") for k, _ in ASK})
     values.update({"ALERT_VIA": "ses", "ALGO_LIVE": "0" if paper else "1",
                    "SWING_LIVE": "1" if "--swing-live" in sys.argv and not paper else "0",
                    "COMMODITY_LIVE": "1" if commodity_live else "0", "COMMODITY_MAX_PREMIUM": budget,
-                   "COMMODITY_MAX_TOTAL_LOSS": flag_value("--commodity-max-loss", "15000")})
+                   "COMMODITY_MAX_TOTAL_LOSS": flag_value("--commodity-max-loss", "15000"),
+                   "NATGAS_LIVE": "1" if natgas_live else "0", "NATGAS_MAX_PREMIUM": natgas_budget,
+                   "NATGAS_MAX_TOTAL_LOSS": flag_value("--natgas-max-loss", "15000")})
     envfile.save(values)
     write_crontab(merged_crontab(read_crontab()))
     print("Installed on this server.")
     print(f"  Long-term bot: {'PAPER' if paper else 'LIVE (real orders)'}")
     print(f"  Swing bot:     {'LIVE (real orders)' if values['SWING_LIVE'] == '1' else 'PAPER (practice)'}")
-    print(f"  Commodity bot: {'LIVE, max premium ₹' + format(float(budget), ',.0f') if commodity_live else 'PAPER (practice)'}")
-    print("  Mon-Fri 09:05 token check | 14:50 long-term | 14:57 swing | 18:25 commodity (India time)")
+    print(f"  Crude bot:     {'LIVE, max premium ₹' + format(float(budget), ',.0f') if commodity_live else 'PAPER (practice)'}")
+    print(f"  Nat gas bot:   {'LIVE, max premium ₹' + format(float(natgas_budget), ',.0f') if natgas_live else 'PAPER (practice)'}")
+    print("  Mon-Fri 09:05 token check | 14:50 long-term | 14:57 swing | 18:25 crude | 18:26 natural gas (India time)")
     print("  Alerts go to " + values["NOTIFY_EMAIL"])
 
 

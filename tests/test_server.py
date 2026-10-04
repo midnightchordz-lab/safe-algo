@@ -19,12 +19,56 @@ class CronTests(unittest.TestCase):
         ours = [l for l in text.splitlines() if l.endswith("# safe-algo")]
         self.assertEqual([l.split()[:5] for l in ours],
                          [["5", "9", "*", "*", "1-5"], ["50", "14", "*", "*", "1-5"],
-                          ["57", "14", "*", "*", "1-5"], ["25", "18", "*", "*", "1-5"]])
+                          ["57", "14", "*", "*", "1-5"], ["25", "18", "*", "*", "1-5"],
+                          ["26", "18", "*", "*", "1-5"]])
+        self.assertTrue(ours[-1].split("autorun.py ")[1].startswith("natgas"))
         self.assertTrue(all("autorun.py" in l for l in ours))
 
     def test_uninstall_removes_only_ours(self):
         existing = "0 7 * * * /other/bot.sh # other-bot\n" + "\n".join(install_linux.cron_lines())
         self.assertEqual(install_linux.merged_crontab(existing, add=False), "0 7 * * * /other/bot.sh # other-bot\n")
+
+
+class NaturalGasTests(unittest.TestCase):
+    def test_own_files_switch_and_limits(self):
+        from commodity.config import CommodityConfig
+        env = {"COMMODITY_UNDERLYING": "NATURALGAS", "COMMODITY_LIVE": "1", "COMMODITY_MAX_PREMIUM": "32000",
+               "NATGAS_LIVE": "0", "NATGAS_MAX_PREMIUM": "25000", "NATGAS_MAX_TOTAL_LOSS": "10000"}
+        with mock.patch.dict(os.environ, env):
+            cfg = CommodityConfig()
+        self.assertFalse(cfg.live)                     # crude being live doesn't make natural gas live
+        self.assertEqual((cfg.max_premium, cfg.max_total_loss), (25000, 10000))
+        self.assertTrue(cfg.state_file.endswith("commodity_naturalgas_state.json"))
+        self.assertTrue(cfg.decisions_file.endswith("commodity_naturalgas_decisions.jsonl"))
+        self.assertTrue(cfg.halt_file.endswith("COMMODITY_NATURALGAS_HALTED"))
+        self.assertEqual(cfg.lots, 1)
+
+    def test_crude_keeps_its_original_files(self):
+        from commodity.config import CommodityConfig
+        with mock.patch.dict(os.environ, {"COMMODITY_UNDERLYING": "CRUDEOIL"}):
+            cfg = CommodityConfig()
+        self.assertTrue(cfg.state_file.endswith(os.sep + "commodity_state.json"))
+        self.assertTrue(cfg.log_file.endswith(os.sep + "commodity.log"))
+
+    def test_natgas_job_runs_the_bot_for_natural_gas(self):
+        import commodity.bot as bot
+        seen = {}
+
+        def fake_main(notify):
+            seen["u"] = os.environ["COMMODITY_UNDERLYING"]
+            notify("hello")
+            return 0
+
+        monday = mock.Mock(weekday=lambda: 0)
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}), \
+                mock.patch.object(autorun, "ensure_token", return_value="tok"), \
+                mock.patch.object(bot, "main", fake_main), \
+                mock.patch.object(autorun, "notify") as note, \
+                mock.patch.object(autorun, "datetime") as dt:
+            dt.now.return_value = monday
+            self.assertEqual(autorun.run_commodity("NATURALGAS"), 0)
+        self.assertEqual(seen["u"], "NATURALGAS")
+        self.assertEqual(note.call_args[0][1], "Safe-Algo Natural Gas")
 
 
 class TokenHandoffTests(unittest.TestCase):

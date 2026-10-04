@@ -4,7 +4,8 @@
                              # (on the Mac with SAFEALGO_SERVER set: then copy it to the server)
   python3 autorun.py trade   # 2:50 PM: log in if still needed, then run the long-term bot
   python3 autorun.py swing   # 2:57 PM: run the swing bot (uses the token from the jobs above)
-  python3 autorun.py commodity  # 6:25 PM: AI + news commodity option bot (runs until ~10:45 PM)
+  python3 autorun.py commodity  # 6:25 PM: AI + news crude oil option bot (runs until ~10:45 PM)
+  python3 autorun.py natgas     # 6:26 PM: the same bot for natural gas (own files, limits, switch)
 
 No orders after 3:10 PM, so nothing lands in the closing auction session (from ~3:15 PM).
 
@@ -185,26 +186,30 @@ def run_swing():
     return rc
 
 
-def run_commodity():
-    """6:25 PM job: the commodity option bot. Uses today's token; asks for a login if missing."""
+def run_commodity(underlying="CRUDEOIL"):
+    """Evening job: the commodity option bot for one commodity (crude 6:25 PM, natural gas 6:26 PM).
+    Uses today's token; asks for a login if missing."""
+    from commodity.config import LABEL
+    title = f"Safe-Algo {LABEL.get(underlying, underlying.title())}"
     if datetime.now(IST).weekday() > 4:
         return 0
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        notify("Commodity bot skipped: ANTHROPIC_API_KEY is not set (re-run install_mac.py).", "Safe-Algo Commodity")
+        notify("Commodity bot skipped: ANTHROPIC_API_KEY is not set (re-run the installer).", title)
         return 1
     token = ensure_token(wait_minutes=15)
     if not token:
-        notify("Commodity bot skipped tonight: no Upstox login.", "Safe-Algo Commodity")
+        notify("Commodity bot skipped tonight: no Upstox login.", title)
         return 1
     os.environ["UPSTOX_ACCESS_TOKEN"] = token
+    os.environ["COMMODITY_UNDERLYING"] = underlying
     import commodity.bot as commodity_bot
 
     try:
-        return commodity_bot.main(notify=lambda m: notify(m, "Safe-Algo Commodity"))
+        return commodity_bot.main(notify=lambda m: notify(m, title))
     except Exception as e:  # noqa: BLE001 - any crash must reach the user
         logging.getLogger("commodity").exception("Commodity bot crashed")
-        notify(f"Commodity bot error: {e}. Check the Upstox app for any open position. See commodity.log.",
-               "Safe-Algo Commodity")
+        notify(f"Commodity bot error: {e}. Check the Upstox app for any open position. See the commodity log.",
+               title)
         return 1
 
 
@@ -213,7 +218,9 @@ def main():
     if job == "swing":
         return run_swing()
     if job == "commodity":
-        return run_commodity()
+        return run_commodity("CRUDEOIL")
+    if job == "natgas":
+        return run_commodity("NATURALGAS")
     if job == "login":
         if not ensure_token(wait_minutes=120):
             notify("No Upstox login this morning. I'll ask again at 2:50 PM.")

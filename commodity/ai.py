@@ -16,8 +16,9 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 NEWS_SYSTEM = (
     "You are a commodities market analyst. Search the web for the most recent news (last 48 hours) "
-    "that moves the price of the given commodity: supply disruptions, OPEC+ decisions, inventories, "
-    "sanctions, geopolitics, demand data, central-bank or dollar moves, and scheduled events in the "
+    "that moves the price of the given commodity: supply disruptions, OPEC+ decisions, inventories and "
+    "storage reports, weather, sanctions, geopolitics, demand data, central-bank or dollar moves, and "
+    "scheduled events in the "
     "next 24 hours. Write a concise brief: bullet points with dates, each marked BULLISH, BEARISH or "
     "NEUTRAL for price, then a one-line net assessment. Report only what sources say; flag conflicts."
 )
@@ -91,6 +92,13 @@ def _sources(response):
     return urls
 
 
+NEWS_FOCUS = {
+    "CRUDEOIL": "international benchmarks Brent/WTI and Indian MCX/NSE",
+    "NATURALGAS": "US Henry Hub prices, the weekly EIA storage report, US weather forecasts and "
+                  "heating/cooling demand, LNG exports and European TTF prices, and Indian MCX/NSE",
+}
+
+
 class Analyst:
     def __init__(self, cfg, client=None):
         self.cfg = cfg
@@ -109,8 +117,8 @@ class Analyst:
 
     def news_brief(self, commodity):
         """Returns (brief_text, source_urls). Empty brief on failure."""
-        messages = [{"role": "user", "content": f"Latest news moving {commodity} prices right now "
-                                                f"(international benchmarks Brent/WTI and Indian MCX/NSE)."}]
+        focus = NEWS_FOCUS.get(commodity.upper(), "international benchmarks and Indian MCX/NSE")
+        messages = [{"role": "user", "content": f"Latest news moving {commodity} prices right now ({focus})."}]
         tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 6}]
         try:
             for _ in range(4):  # continue if the server pauses a long search turn

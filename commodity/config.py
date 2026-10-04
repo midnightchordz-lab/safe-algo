@@ -15,6 +15,11 @@ def env(name, default, cast=str):
     return field(default_factory=lambda: _env(name, default, cast))
 
 
+# Settings prefix in .env per commodity (crude uses the original COMMODITY_* names).
+ENV_PREFIX = {"CRUDEOIL": "COMMODITY", "NATURALGAS": "NATGAS"}
+LABEL = {"CRUDEOIL": "Crude", "NATURALGAS": "Natural Gas"}
+
+
 @dataclass
 class CommodityConfig:
     live: bool = field(default_factory=lambda: _env("COMMODITY_LIVE", "0") == "1")
@@ -54,12 +59,24 @@ class CommodityConfig:
     model: str = "claude-opus-5-5"
     effort: str = env("COMMODITY_AI_EFFORT", "high")
 
-    state_file: str = os.path.join(HERE, "commodity_state.json")
-    decisions_file: str = os.path.join(HERE, "commodity_decisions.jsonl")
-    log_file: str = os.path.join(HERE, "commodity.log")
-    halt_file: str = os.path.join(HERE, "COMMODITY_HALTED")
+    # Files: crude keeps the original names; other commodities get their own (filled in below).
+    state_file: str = ""
+    decisions_file: str = ""
+    log_file: str = ""
+    halt_file: str = ""
 
     def __post_init__(self):
+        self.underlying = self.underlying.upper()
+        prefix = ENV_PREFIX.get(self.underlying, "COMMODITY")
+        if prefix != "COMMODITY":  # each extra commodity has its own live switch, premium cap and loss limit
+            self.live = _env(f"{prefix}_LIVE", "0") == "1"
+            self.max_premium = _env(f"{prefix}_MAX_PREMIUM", 0.0, float)
+            self.max_total_loss = _env(f"{prefix}_MAX_TOTAL_LOSS", 15_000.0, float)
+        tag = "" if self.underlying == "CRUDEOIL" else "_" + self.underlying.lower()
+        self.state_file = self.state_file or os.path.join(HERE, f"commodity{tag}_state.json")
+        self.decisions_file = self.decisions_file or os.path.join(HERE, f"commodity{tag}_decisions.jsonl")
+        self.log_file = self.log_file or os.path.join(HERE, f"commodity{tag}.log")
+        self.halt_file = self.halt_file or os.path.join(HERE, f"COMMODITY{tag.upper()}_HALTED")
         self.min_confidence = max(50, int(self.min_confidence))
         self.min_edge = max(0.25, float(self.min_edge))
         self.lots = 1

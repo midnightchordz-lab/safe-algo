@@ -2,6 +2,7 @@
 
   UPSTOX_ACCESS_TOKEN=$(cat token.txt) python3 -m commodity.score            # every logged night
   UPSTOX_ACCESS_TOKEN=$(cat token.txt) python3 -m commodity.score --days 14  # just the last 14 days
+  COMMODITY_UNDERLYING=NATURALGAS UPSTOX_ACCESS_TOKEN=$(cat token.txt) python3 -m commodity.score
 
 Read-only: it reads commodity_decisions.jsonl and 15-minute futures candles from Upstox, never
 places orders. For every plan Claude gave (the main call if it was UP/DOWN, plus the conditional
@@ -22,6 +23,7 @@ from upstox_api import API, Upstox, UpstoxError
 
 DELTA = 0.5
 LOT_UNITS = 100      # NSE CRUDEOIL: 100 barrels per lot
+UNITS = {"CRUDEOIL": 100, "NATURALGAS": 1250}  # mmBtu per natural gas lot
 CHARGES = 120.0      # rough round trip for one option lot
 
 
@@ -68,15 +70,15 @@ def simulate(plan, candles, start, cfg):
     return {"result": "time", "entry": entered, "exit": last, "points": sign * (last - entered)}
 
 
-def rupees(points):
-    return DELTA * points * LOT_UNITS - CHARGES
+def rupees(points, units=LOT_UNITS):
+    return DELTA * points * units - CHARGES
 
 
-def summarise(results):
+def summarise(results, units=LOT_UNITS):
     """results: list of simulate() dicts. Freqtrade-style numbers for the triggered ones."""
     done = [r for r in results if r["result"] != "no trigger"]
-    wins = [rupees(r["points"]) for r in done if rupees(r["points"]) > 0]
-    losses = [rupees(r["points"]) for r in done if rupees(r["points"]) <= 0]
+    wins = [rupees(r["points"], units) for r in done if rupees(r["points"], units) > 0]
+    losses = [rupees(r["points"], units) for r in done if rupees(r["points"], units) <= 0]
     return {"plans": len(results), "triggered": len(done), "wins": len(wins), "losses": len(losses),
             "win_rate": round(100 * len(wins) / len(done)) if done else 0,
             "avg_win": round(sum(wins) / len(wins)) if wins else 0,
@@ -110,6 +112,7 @@ def line(s):
 
 def main(up=None, out=print):
     cfg = CommodityConfig()
+    units = UNITS.get(cfg.underlying, LOT_UNITS)
     days = int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else None
     entries = load_entries(cfg.decisions_file, days)
     today = datetime.now(IST).date().isoformat()
@@ -143,13 +146,13 @@ def main(up=None, out=print):
         out("No finished plans to score yet.")
         return 0
     for day, start, label, plan, armed, r in rows:
-        move = f"{r['entry']:g} -> {r['exit']:g}, {r['points']:+.0f} pts, ~₹{rupees(r['points']):,.0f}" \
+        move = f"{r['entry']:g} -> {r['exit']:g}, {r['points']:+.0f} pts, ~₹{rupees(r['points'], units):,.0f}" \
             if r["entry"] is not None else ""
         out(f"{day} {start}  {engine.describe(plan) if 'plan' in label else label + ' ' + str(plan['entry_trigger'])}"
             f"  [{'armed' if armed else 'not armed'}]  {r['result']}  {move}")
     out("")
-    out("ALL plans:   " + line(summarise([r for *_, r in rows])))
-    out("ARMED only:  " + line(summarise([r for *_, armed, r in rows if armed])))
+    out("ALL plans:   " + line(summarise([r for *_, r in rows], units)))
+    out("ARMED only:  " + line(summarise([r for *_, armed, r in rows if armed], units)))
     out("(Rough: futures levels, 15-minute bars, option ~0.5 x futures move, ₹120 charges per trade.)")
     return 0
 
