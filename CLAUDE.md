@@ -43,3 +43,6 @@ login listener without the owner's explicit approval.
   keep code 3.9-compatible and pass newer Claude API fields via `extra_body` / `extra_headers`.
 - Give the owner exact, copy-paste Terminal commands, one per line, with no placeholders they might
   run literally.
+- Whenever commands are meant for the server, ALWAYS start with the SSH line (run from a Mac Terminal tab),
+  then `cd ~/safe-algo`:
+  `ssh -i ~/.ssh/safe-algo-mumbai.pem ubuntu@65.0.244.16`
