@@ -1,19 +1,23 @@
 """Entry point for the scheduled jobs (see install_mac.py).
 
   python3 autorun.py login   # 9:00 AM: make sure there's a valid token for today
+                             # (on the Mac with SAFEALGO_SERVER set: then copy it to the server)
   python3 autorun.py trade   # 2:50 PM: log in if still needed, then run the long-term bot
   python3 autorun.py swing   # 2:57 PM: run the swing bot (uses the token from the jobs above)
   python3 autorun.py commodity  # 6:25 PM: AI + news commodity option bot (runs until ~10:45 PM)
 
 No orders after 3:10 PM, so nothing lands in the closing auction session (from ~3:15 PM).
 
-Sends a macOS notification for anything that needs your attention.
+Sends a macOS notification (on the Mac) and/or an email (if SMTP_USER / SMTP_PASSWORD are set,
+e.g. on the server) for anything that needs your attention.
 """
 import logging
 import os
+import smtplib
 import subprocess
 import sys
 from datetime import datetime
+from email.message import EmailMessage
 
 import envfile
 
@@ -22,8 +26,28 @@ import get_token  # noqa: E402  (needs the .env values loaded first)
 from market_hours import IST, can_place_orders  # noqa: E402
 
 
+def send_email(message, title="Safe-Algo"):
+    """Email the alert through Gmail (an app password, not the real one). Silent if not configured."""
+    user, password = os.environ.get("SMTP_USER", ""), os.environ.get("SMTP_PASSWORD", "")
+    if not user or not password:
+        return False
+    mail = EmailMessage()
+    mail["From"], mail["To"] = user, os.environ.get("NOTIFY_EMAIL") or user
+    mail["Subject"] = f"{title}: {message[:70]}"
+    mail.set_content(message)
+    try:
+        with smtplib.SMTP_SSL(os.environ.get("SMTP_HOST", "smtp.gmail.com"), 465, timeout=30) as smtp:
+            smtp.login(user, password.replace(" ", ""))
+            smtp.send_message(mail)
+        return True
+    except (OSError, smtplib.SMTPException) as e:
+        print(f"[notify] email failed: {e}", flush=True)
+        return False
+
+
 def notify(message, title="Safe-Algo"):
     print(f"{datetime.now(IST):%Y-%m-%d %H:%M} [notify] {message}", flush=True)
+    send_email(message, title)
     if sys.platform == "darwin":
         safe = message.replace('"', "'").replace("\\", "/")
         subprocess.run(["osascript", "-e",
@@ -35,10 +59,43 @@ def market_open(now=None):
     return can_place_orders(now)
 
 
+def push_token():
+    """Mac side of the server setup: copy today's token to the server over SSH. True if copied."""
+    server = os.environ.get("SAFEALGO_SERVER", "")
+    if not server:
+        return False
+    key = os.path.expanduser(os.environ.get("SAFEALGO_SSH_KEY", "~/.ssh/safe-algo-mumbai.pem"))
+    r = subprocess.run(["scp", "-q", "-p", "-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=20",
+                        get_token.TOKEN_FILE, f"{server}:safe-algo/token.txt"],
+                       capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        notify(f"Logged in, but could not send the token to the server: {r.stderr.strip()[:150]}. "
+               "Run `python3 autorun.py login` on the Mac again.")
+        return False
+    notify("Upstox login sent to the server. The bots will run there today; the Mac can sleep.")
+    return True
+
+
+def wait_for_pushed_token(wait_minutes):
+    """Server side: no browser here, so wait for the Mac to send today's token."""
+    import time
+    notify("No Upstox login yet today. On your Mac, log in to Upstox (or run `python3 autorun.py login` "
+           f"in ~/safe-algo). I'll wait up to {wait_minutes} minutes.", "Safe-Algo login")
+    deadline = time.time() + wait_minutes * 60
+    while time.time() < deadline:
+        time.sleep(60)
+        token = get_token.read_token()
+        if get_token.token_is_valid(token):
+            return token
+    return ""
+
+
 def ensure_token(wait_minutes):
     token = get_token.read_token()
     if get_token.token_is_valid(token):
         return token
+    if sys.platform != "darwin":
+        return wait_for_pushed_token(wait_minutes)
     notify("Please log in to Upstox (a browser tab just opened) so Safe-Algo can run today.")
     try:
         token = get_token.auto_login(wait_minutes)
@@ -129,6 +186,8 @@ def main():
     if job == "login":
         if not ensure_token(wait_minutes=120):
             notify("No Upstox login this morning. I'll ask again at 2:50 PM.")
+        elif sys.platform == "darwin":
+            push_token()
         return 0
 
     if not market_open():

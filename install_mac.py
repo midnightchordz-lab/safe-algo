@@ -4,6 +4,8 @@
   python3 install_mac.py --swing-live  # long-term bot LIVE, swing bot LIVE
   python3 install_mac.py --paper       # both in practice mode
   python3 install_mac.py --uninstall
+  python3 install_mac.py --server ubuntu@65.0.244.16
+      # the bots run on the server: this Mac only does the 9:00 login and sends the token there
 
 Commodity option bot (AI + news, 6:25 PM): PAPER by default. To trade it live:
   python3 install_mac.py --commodity-live --commodity-budget 32000 --commodity-max-loss 15000
@@ -53,6 +55,31 @@ def flag_value(name, default):
             return sys.argv[i + 1]
         sys.exit(f"{name} needs a number")
     return default
+
+
+def install_login_only(server):
+    """Server mode: the Mac keeps only the 9:00 login, then copies the token to the server."""
+    values = {k: os.environ.get(k, "") for k in ("UPSTOX_API_KEY", "UPSTOX_API_SECRET")}
+    if not all(values.values()):
+        sys.exit("UPSTOX_API_KEY / UPSTOX_API_SECRET are not in .env. Run the normal install first.")
+    values.update(SAFEALGO_SERVER=server,
+                  SAFEALGO_SSH_KEY=os.environ.get("SAFEALGO_SSH_KEY", "~/.ssh/safe-algo-mumbai.pem"))
+    envfile.save(values)
+    os.makedirs(AGENTS, exist_ok=True)
+    for label in list(JOBS) + OLD_JOBS:
+        remove(label)
+    label, (job, hour, minute) = "com.safealgo.login", JOBS["com.safealgo.login"]
+    plist = {"Label": label, "ProgramArguments": [sys.executable, os.path.join(HERE, "autorun.py"), job],
+             "WorkingDirectory": HERE,
+             "StartCalendarInterval": [{"Weekday": d, "Hour": hour, "Minute": minute} for d in range(1, 6)],
+             "StandardOutPath": os.path.join(HERE, "autorun-login.log"),
+             "StandardErrorPath": os.path.join(HERE, "autorun-login.log")}
+    with open(plist_path(label), "wb") as f:
+        plistlib.dump(plist, f)
+    subprocess.run(["launchctl", "load", "-w", plist_path(label)], check=True)
+    print("Installed (server mode).")
+    print("  Mon-Fri 09:00  Upstox login page opens on this Mac; after you log in, the token goes to")
+    print(f"                 {server}. The bots no longer run on this Mac.")
 
 
 def install(live, swing_live, commodity_live=False, commodity_budget="0", commodity_max_loss="15000"):
@@ -106,6 +133,9 @@ if __name__ == "__main__":
         sys.exit("This installer is for macOS.")
     if "--uninstall" in sys.argv:
         uninstall()
+    elif "--server" in sys.argv:
+        envfile.load()
+        install_login_only(flag_value("--server", ""))
     else:
         envfile.load()  # keep the saved keys, so re-installing doesn't need them typed into this Terminal
         paper = "--paper" in sys.argv
