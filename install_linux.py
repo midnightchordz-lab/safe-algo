@@ -4,11 +4,12 @@
   .venv/bin/python install_linux.py --swing-live  # swing bot LIVE too
   .venv/bin/python install_linux.py --paper       # everything in practice mode
   .venv/bin/python install_linux.py --commodity-live --commodity-budget 32000 --commodity-max-loss 15000
-  .venv/bin/python install_linux.py --test-email  # just send a test email
+  .venv/bin/python install_linux.py --test-email  # just send a test email (and save the alert address)
   .venv/bin/python install_linux.py --uninstall
 
 Asks once for any key that isn't saved in .env yet (typing is hidden for secrets) and saves them
-there (owner-only file). Alerts go by email through Gmail with an app password.
+there (owner-only file). Alerts go by email through Amazon SES (the server's IAM role sends them;
+Gmail refuses logins from cloud servers), to an address verified in SES.
 
 The daily Upstox login happens on the Mac (install_mac.py --server ...), which copies the token here.
 Schedule (cron, server clock must be Asia/Kolkata):
@@ -26,13 +27,11 @@ import envfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TAG = "# safe-algo"
 JOBS = [("login", 9, 5), ("trade", 14, 50), ("swing", 14, 57), ("commodity", 18, 25)]
-SECRETS = {"UPSTOX_API_SECRET", "ANTHROPIC_API_KEY", "SMTP_PASSWORD"}
+SECRETS = {"UPSTOX_API_SECRET", "ANTHROPIC_API_KEY"}
 ASK = [("UPSTOX_API_KEY", "Upstox API key"), ("UPSTOX_API_SECRET", "Upstox API secret"),
        ("ANTHROPIC_API_KEY", "Anthropic API key (for the commodity bot)"),
        ("ANTHROPIC_WORKSPACE_ID", "Anthropic workspace ID (Enter to skip)"),
-       ("SMTP_USER", "Gmail address that sends the alerts"),
-       ("SMTP_PASSWORD", "Gmail app password (16 letters)"),
-       ("NOTIFY_EMAIL", "Email that receives the alerts (Enter = same Gmail)")]
+       ("NOTIFY_EMAIL", "Email for the alerts (the one verified in Amazon SES)")]
 
 
 def python():
@@ -66,8 +65,6 @@ def ask_missing():
         if os.environ.get(key):
             continue
         value = (getpass.getpass if key in SECRETS else input)(f"{label}: ").strip()
-        if key == "NOTIFY_EMAIL" and not value:
-            value = os.environ.get("SMTP_USER", "")
         os.environ[key] = value
 
 
@@ -78,6 +75,18 @@ def flag_value(name, default):
             return sys.argv[i + 1]
         sys.exit(f"{name} needs a value")
     return default
+
+
+def read_env():
+    """What's in .env now (so saving keeps keys this installer doesn't ask about)."""
+    out = {}
+    if os.path.exists(envfile.PATH):
+        with open(envfile.PATH) as f:
+            for line in f:
+                if "=" in line and not line.strip().startswith("#"):
+                    k, v = line.strip().split("=", 1)
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
 
 
 def timezone_ok():
@@ -93,10 +102,14 @@ def main():
         print("Removed the Safe-Algo schedule. Nothing will run automatically now.")
         return
     ask_missing()
+    os.environ["ALERT_VIA"] = "ses"
     import autorun
     if "--test-email" in sys.argv:
         ok = autorun.send_email("Test from your Safe-Algo server. Alerts will arrive like this.", "Safe-Algo")
-        print("Test email sent. Check your inbox." if ok else "Email failed: check the Gmail app password.")
+        print("Test email sent. Check your inbox." if ok else
+              "Email failed: check the address is verified in SES and the server has the SES role.")
+        if ok:
+            envfile.save(dict(read_env(), NOTIFY_EMAIL=os.environ["NOTIFY_EMAIL"], ALERT_VIA="ses"))
         return
     if not timezone_ok():
         sys.exit("Set the server clock to India time first: sudo timedatectl set-timezone Asia/Kolkata")
@@ -105,8 +118,8 @@ def main():
     budget = flag_value("--commodity-budget", "0")
     if commodity_live and float(budget) <= 0:
         sys.exit("--commodity-live needs --commodity-budget N (the max premium for its one lot).")
-    values = {k: os.environ.get(k, "") for k, _ in ASK}
-    values.update({"ALGO_LIVE": "0" if paper else "1",
+    values = dict(read_env(), **{k: os.environ.get(k, "") for k, _ in ASK})
+    values.update({"ALERT_VIA": "ses", "ALGO_LIVE": "0" if paper else "1",
                    "SWING_LIVE": "1" if "--swing-live" in sys.argv and not paper else "0",
                    "COMMODITY_LIVE": "1" if commodity_live else "0", "COMMODITY_MAX_PREMIUM": budget,
                    "COMMODITY_MAX_TOTAL_LOSS": flag_value("--commodity-max-loss", "15000")})

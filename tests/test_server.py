@@ -84,5 +84,23 @@ class EmailFallbackTests(unittest.TestCase):
         plain.return_value.__enter__.return_value.send_message.assert_called_once()
 
 
+class SesTests(unittest.TestCase):
+    def test_server_alerts_go_through_ses(self):
+        fake = mock.MagicMock()
+        env = {"ALERT_VIA": "ses", "NOTIFY_EMAIL": "me@gmail.com", "SMTP_USER": "", "SMTP_PASSWORD": ""}
+        with mock.patch.dict(os.environ, env), mock.patch.dict(sys.modules, {"boto3": fake}):
+            self.assertTrue(autorun.send_email("Bought 1 lot", "Safe-Algo Commodity"))
+        kw = fake.client.return_value.send_email.call_args.kwargs
+        self.assertEqual(kw["Destination"], {"ToAddresses": ["me@gmail.com"]})
+        self.assertEqual(kw["Content"]["Simple"]["Subject"]["Data"], "Safe-Algo Commodity: Bought 1 lot")
+
+    def test_ses_failure_never_raises(self):
+        fake = mock.MagicMock()
+        fake.client.return_value.send_email.side_effect = RuntimeError("not verified")
+        with mock.patch.dict(os.environ, {"ALERT_VIA": "ses", "NOTIFY_EMAIL": "me@gmail.com"}), \
+                mock.patch.dict(sys.modules, {"boto3": fake}):
+            self.assertFalse(autorun.send_email("hi"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,8 +26,26 @@ import get_token  # noqa: E402  (needs the .env values loaded first)
 from market_hours import IST, can_place_orders  # noqa: E402
 
 
+def send_ses(message, title="Safe-Algo"):
+    """Email the alert through Amazon SES (on the AWS server; uses the server's IAM role, no password)."""
+    to = os.environ.get("NOTIFY_EMAIL", "")
+    try:
+        import boto3
+        boto3.client("sesv2", region_name=os.environ.get("SES_REGION", "ap-south-1")).send_email(
+            FromEmailAddress=to, Destination={"ToAddresses": [to]},
+            Content={"Simple": {"Subject": {"Data": f"{title}: {message[:70]}"},
+                                "Body": {"Text": {"Data": message}}}})
+        return True
+    except Exception as e:  # noqa: BLE001 - an alert failure must never stop a bot
+        print(f"[notify] SES email failed: {e.__class__.__name__} {e}", flush=True)
+        return False
+
+
 def send_email(message, title="Safe-Algo"):
-    """Email the alert through Gmail (an app password, not the real one). Silent if not configured."""
+    """Email the alert: Amazon SES if ALERT_VIA=ses (server), else Gmail with an app password (Mac).
+    Silent if neither is configured."""
+    if os.environ.get("ALERT_VIA") == "ses" and os.environ.get("NOTIFY_EMAIL"):
+        return send_ses(message, title)
     user, password = os.environ.get("SMTP_USER", ""), os.environ.get("SMTP_PASSWORD", "")
     if not user or not password:
         return False
