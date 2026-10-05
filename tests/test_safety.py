@@ -122,3 +122,88 @@ class RebalanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrderConfirmationTests(unittest.TestCase):
+    """5 Oct 2026: Upstox answered 'Order not found' right after accepting the orders, the bot
+    logged a failure and its record missed shares it really bought. These pin the fix."""
+
+    def setUp(self):
+        from unittest import mock
+        import upstox_api
+        self.mock, self.mod = mock, upstox_api
+        self.up = upstox_api.Upstox("token")
+        self.up.place_order = lambda *a, **k: "OID1"
+        self.not_found = upstox_api.UpstoxError(
+            "GET https://api.upstox.com/v2/order/details -> HTTP 404: {'errorCode': 'UDAPI100010', "
+            "'message': 'Order not found'}")
+
+    def test_not_found_right_after_placing_is_retried(self):
+        replies = iter([self.not_found, self.not_found,
+                        {"status": "complete", "filled_quantity": 18, "average_price": 257.4}])
+
+        def details(oid):
+            r = next(replies)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        self.up.order_details = details
+        self.up.order_book = lambda: []
+        with self.mock.patch("time.sleep"):
+            self.assertEqual(self.up.execute("K", "BUY", 18, 258.6), (18, 257.4))
+
+    def test_order_book_used_when_details_still_missing(self):
+        def details(oid):
+            raise self.not_found
+        self.up.order_details = details
+        self.up.order_book = lambda: [{"order_id": "OID1", "status": "complete", "filled_quantity": 39,
+                                       "average_price": 121.7}]
+        with self.mock.patch("time.sleep"):
+            self.assertEqual(self.up.execute("K", "BUY", 39, 122.3), (39, 121.7))
+
+    def test_other_errors_still_raise(self):
+        def details(oid):
+            raise self.mod.UpstoxError("HTTP 401 unauthorized")
+        self.up.order_details = details
+        with self.mock.patch("time.sleep"), self.assertRaises(self.mod.UpstoxError):
+            self.up.execute("K", "BUY", 1, 10)
+
+    def test_never_found_is_an_error_not_a_silent_zero(self):
+        def details(oid):
+            raise self.not_found
+        self.up.order_details = details
+        self.up.order_book = lambda: []
+        self.up.cancel_order = lambda oid: None
+        with self.mock.patch("time.sleep"), self.mock.patch("time.time", side_effect=[0, 0, 99, 99, 99]), \
+                self.assertRaises(self.mod.UpstoxError):
+            self.up.execute("K", "BUY", 1, 10)
+
+
+class LedgerMismatchTests(unittest.TestCase):
+    def setUp(self):
+        import bot
+        self.bot, self.cfg = bot, Config()
+        self.keys = {"NIFTYBEES": "NSE_EQ|N", "GOLDBEES": "NSE_EQ|G"}
+
+    def test_extra_broker_shares_are_reported_so_the_bot_does_not_buy_twice(self):
+        state = new_state(self.cfg)                                  # record: no holdings
+        extra = self.bot.reconcile(state, {"NSE_EQ|N": 18, "NSE_EQ|G": 39}, 50000.0, self.keys)
+        self.assertEqual(extra, [("NIFTYBEES", 0, 18), ("GOLDBEES", 0, 39)])
+        self.assertEqual(state["positions"], {})                     # nothing adopted silently
+
+    def test_matching_record_reports_nothing(self):
+        state = new_state(self.cfg)
+        apply_fill(state, "NIFTYBEES", "BUY", 18, 257.4, self.cfg)
+        self.assertEqual(self.bot.reconcile(state, {"NSE_EQ|N": 18}, 5000.0, self.keys), [])
+
+    def test_adopt_holdings_records_the_real_fills(self):
+        state = new_state(self.cfg)
+        added = self.bot.adopt_holdings(state, {"NSE_EQ|N": (18, 257.4), "NSE_EQ|G": (39, 121.7),
+                                                 "NSE_EQ|OTHER": (5, 100.0)}, self.keys, self.cfg)
+        self.assertEqual([a[:2] for a in added], [("NIFTYBEES", 18), ("GOLDBEES", 39)])
+        self.assertEqual({s: p["qty"] for s, p in state["positions"].items()}, {"NIFTYBEES": 18, "GOLDBEES": 39})
+        spent = 18 * 257.4 + 39 * 121.7
+        self.assertLess(state["cash"], self.cfg.budget - spent + 1)  # cash reduced by the cost (plus charges)
+        self.assertGreater(state["cash"], self.cfg.budget - spent - 100)
+        # With the real holdings on record, the next run doesn't buy again.
+        self.assertEqual(decide(state, {"NIFTYBEES": [257.4] * 250, "GOLDBEES": [121.7] * 250}, self.cfg), [])

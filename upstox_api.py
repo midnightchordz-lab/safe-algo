@@ -101,6 +101,21 @@ class Upstox:
         data = self._req("GET", f"{API}/v2/user/get-funds-and-margin", params={"segment": "SEC"})
         return float(data["equity"]["available_margin"])
 
+    def holdings_detail(self):
+        """{instrument_key: (quantity, average_price)} for delivery holdings incl. today's buys."""
+        out = {}
+        for h in self._req("GET", f"{API}/v2/portfolio/long-term-holdings"):
+            qty = int(h.get("quantity", 0)) + int(h.get("t1_quantity", 0) or 0)
+            if qty:
+                out[h["instrument_token"]] = (qty, float(h.get("average_price") or 0))
+        for p in self._req("GET", f"{API}/v2/portfolio/short-term-positions"):
+            qty = int(p.get("quantity", 0))
+            if p.get("product") == "D" and qty > 0:
+                old_q, old_px = out.get(p["instrument_token"], (0, 0.0))
+                px = float(p.get("buy_price") or p.get("average_price") or 0)
+                out[p["instrument_token"]] = (old_q + qty, (old_q * old_px + qty * px) / (old_q + qty))
+        return out
+
     def holdings(self):
         """{instrument_key: quantity} for delivery holdings (incl. T1 shares)."""
         out = {}
@@ -152,6 +167,20 @@ class Upstox:
     def cancel_order(self, order_id):
         return self._req("DELETE", f"{ORDER_API}/v3/order/cancel", params={"order_id": order_id})
 
+    def order_status(self, order_id):
+        """Order details, or {} if Upstox doesn't know the order yet. Right after placing, the
+        details endpoint can briefly answer 'Order not found' (UDAPI100010); the order book is
+        checked as a second source before giving up."""
+        try:
+            return self.order_details(order_id)
+        except UpstoxError as e:
+            if "UDAPI100010" not in str(e) and "not found" not in str(e).lower():
+                raise
+        for o in self.order_book() or []:
+            if o.get("order_id") == order_id:
+                return o
+        return {}
+
     def execute(self, instrument_key, side, qty, limit_price, wait_s=30, poll_s=2):
         """Place a limit order, wait for it, cancel any unfilled remainder.
 
@@ -162,7 +191,7 @@ class Upstox:
         deadline = time.time() + wait_s
         d = {}
         while time.time() < deadline:
-            d = self.order_details(oid)
+            d = self.order_status(oid)
             if d.get("status") in ("complete", "rejected", "cancelled"):
                 break
             time.sleep(poll_s)
@@ -172,7 +201,10 @@ class Upstox:
             except UpstoxError:
                 pass  # may have filled in the meantime
             time.sleep(poll_s)
-            d = self.order_details(oid)
+            d = self.order_status(oid)
+        if not d:
+            raise UpstoxError(f"order {oid} was placed but Upstox never reported its status; "
+                              "check the Orders screen (the next run halts if holdings don't match)")
         return int(d.get("filled_quantity") or 0), float(d.get("average_price") or 0.0)
 
 

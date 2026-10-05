@@ -72,7 +72,7 @@ class Broker:
     def wait(self, order_id, wait_s=30):
         deadline, d = time.time() + wait_s, {}
         while time.time() < deadline:
-            d = self.up.order_details(order_id)
+            d = self.up.order_status(order_id)
             if d.get("status") in ("complete", "rejected", "cancelled"):
                 return d
             time.sleep(2)
@@ -81,7 +81,7 @@ class Broker:
         except UpstoxError:
             pass
         time.sleep(2)
-        return self.up.order_details(order_id)
+        return self.up.order_status(order_id)
 
     def buy(self, key, lots, limit):
         if not self.live:
@@ -99,7 +99,7 @@ class Broker:
         """Average price if the exchange stop-loss already executed, else None."""
         if not self.live or not stop_id:
             return None
-        d = self.up.order_details(stop_id)
+        d = self.up.order_status(stop_id)
         return float(d.get("average_price") or 0) if d.get("status") == "complete" else None
 
     def sell_now(self, key, lots, stop_id, price):

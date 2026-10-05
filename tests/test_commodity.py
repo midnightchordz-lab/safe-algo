@@ -167,6 +167,8 @@ class BotTests(unittest.TestCase):
                 return {"status": "trigger pending"} if kind == "SL" else \
                     {"status": "complete", "average_price": orders[n - 1][3], "filled_quantity": 100}
 
+            order_status = order_details
+
             def cancel_order(self, oid):
                 orders.append(("CANCEL", oid, "", 0, 0))
 

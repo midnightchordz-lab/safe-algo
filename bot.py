@@ -34,7 +34,14 @@ def save_state(cfg, state):
 
 
 def reconcile(state, broker_qty, broker_cash, keys):
-    """Trust the broker over our ledger when they disagree, in the safe direction."""
+    """Trust the broker over our ledger when they disagree, in the safe direction.
+
+    Returns [(symbol, ledger_qty, broker_qty)] where the broker holds MORE than the ledger knows
+    about (e.g. an order filled but its confirmation was lost). The caller must not trade then,
+    or it could buy the same shares twice."""
+    extra = [(sym, state["positions"].get(sym, {"qty": 0})["qty"], broker_qty.get(key, 0))
+             for sym, key in keys.items()
+             if broker_qty.get(key, 0) > state["positions"].get(sym, {"qty": 0})["qty"]]
     for sym in list(state["positions"]):
         held = broker_qty.get(keys[sym], 0)
         if held < state["positions"][sym]["qty"]:
@@ -47,6 +54,19 @@ def reconcile(state, broker_qty, broker_cash, keys):
     if broker_cash < state["cash"]:
         log.warning("Broker cash ₹%.2f < ledger cash ₹%.2f, capping ledger", broker_cash, state["cash"])
         state["cash"] = broker_cash
+    return extra
+
+
+def adopt_holdings(state, detail, keys, cfg):
+    """Add shares Upstox holds beyond the ledger (bot's own symbols only) at their average price."""
+    added = []
+    for sym, key in keys.items():
+        held, avg = detail.get(key, (0, 0.0))
+        known = state["positions"].get(sym, {"qty": 0})["qty"]
+        if held > known and avg > 0:
+            apply_fill(state, sym, "BUY", held - known, avg, cfg)
+            added.append((sym, held - known, avg))
+    return added
 
 
 def main():
@@ -65,6 +85,19 @@ def main():
             os.remove(cfg.halt_file)
         log.info("Halt cleared. Trading resumes on the next run.")
         return 0
+    if "--adopt-holdings" in sys.argv:
+        api = Upstox(cfg.access_token)
+        added = adopt_holdings(state, api.holdings_detail(), resolve_instrument_keys(cfg.symbols, cfg.instrument_keys), cfg)
+        for sym, qty, avg in added:
+            log.info("Adopted %d %s @ ₹%.2f from Upstox into the bot's record", qty, sym, avg)
+        if state["halted"] and state["halt_reason"].startswith("ledger mismatch"):
+            state["halted"], state["halt_reason"] = False, ""
+            if os.path.exists(cfg.halt_file):
+                os.remove(cfg.halt_file)
+        save_state(cfg, state)
+        log.info("Record now: cash ₹%.2f | positions %s", state["cash"],
+                 {s: p["qty"] for s, p in state["positions"].items()})
+        return 0
     if state["halted"]:
         # Frozen: no normal trading, but the hard floor below is still enforced.
         log.error("Bot is HALTED: %s. Only the ₹%.0f hard floor is being watched. "
@@ -74,7 +107,17 @@ def main():
     keys = resolve_instrument_keys(cfg.symbols, cfg.instrument_keys)
 
     if cfg.live:
-        reconcile(state, api.holdings(), api.available_cash(), keys)
+        extra = reconcile(state, api.holdings(), api.available_cash(), keys)
+        if extra:
+            what = ", ".join(f"{sym} (record {known}, Upstox {held})" for sym, known, held in extra)
+            reason = f"ledger mismatch: Upstox holds more than the bot's record: {what}"
+            halt(state, reason)
+            with open(cfg.halt_file, "w") as f:
+                f.write(f"{datetime.now().isoformat()} {reason}\n")
+            save_state(cfg, state)
+            log.error("%s. Not trading, so nothing is bought twice. If those shares are the bot's, run "
+                      "`.venv/bin/python bot.py --adopt-holdings` on the server.", reason)
+            return 1
 
     closes = {s: api.daily_closes(k) for s, k in keys.items()}
     ltp = api.ltp(list(keys.values()))

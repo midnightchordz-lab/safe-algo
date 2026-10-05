@@ -152,7 +152,7 @@ def find(symbol):
 def wait_fill(up, order_id, wait_s=30):
     deadline, d = time.time() + wait_s, {}
     while time.time() < deadline:
-        d = up.order_details(order_id)
+        d = up.order_status(order_id)
         if d.get("status") in ("complete", "rejected", "cancelled"):
             return d
         time.sleep(2)
@@ -162,7 +162,7 @@ def wait_fill(up, order_id, wait_s=30):
     except UpstoxError:
         pass
     time.sleep(2)
-    return up.order_details(order_id)
+    return up.order_status(order_id)
 
 
 def cmd_buy(args):

@@ -55,7 +55,7 @@ def wait_for_fill(api, gtt_id, wait_s=30):
             rules = api.gtt_details(gtt_id).get("rules", [])
             entry = next((r for r in rules if r.get("strategy") == "ENTRY" and r.get("order_id")), None)
             if entry:
-                d = api.order_details(entry["order_id"])
+                d = api.order_status(entry["order_id"])
                 if d.get("status") in ("complete", "rejected", "cancelled"):
                     return int(d.get("filled_quantity") or 0), float(d.get("average_price") or 0)
         except UpstoxError as e:
@@ -71,7 +71,7 @@ def exit_fill(api, gtt_id):
         return None
     for r in rules:
         if r.get("strategy") in ("TARGET", "STOPLOSS") and r.get("order_id"):
-            d = api.order_details(r["order_id"])
+            d = api.order_status(r["order_id"])
             if d.get("status") == "complete":
                 return float(d["average_price"]), r["strategy"].lower().replace("stoploss", "stop")
     return None
