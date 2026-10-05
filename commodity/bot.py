@@ -251,7 +251,7 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
                 notify(f"Commodity: no plan triggered by {end}. No trade tonight.")
                 save_state(cfg, state)
                 return 0
-            status(f"crude {fut_price:,.1f}, armed: {' / '.join(engine.describe(p) for p in armed)} until {end}")
+            status(f"{cfg.underlying.lower()} {fut_price:,.1f}, armed: {' / '.join(engine.describe(p) for p in armed)} until {end}")
             sleep(cfg.poll_seconds)
         notify(f"Commodity: executing pre-committed plan {engine.describe(decision)}.")
 
@@ -268,7 +268,7 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
         if now().strftime("%H:%M") >= end:
             notify(f"Commodity: entry {decision['entry_trigger']} never triggered by {end}. No trade.")
             return 0
-        status(f"crude {fut_price:,.1f}, waiting for {side} entry {decision['entry_trigger']} until {end}")
+        status(f"{cfg.underlying.lower()} {fut_price:,.1f}, waiting for {side} entry {decision['entry_trigger']} until {end}")
         sleep(cfg.poll_seconds)
 
     opt = market.pick_option(trade_rows, side, fut_price, now(), cfg.min_days_to_expiry)
@@ -329,7 +329,7 @@ def main(notify=print, analyst=None, up=None, sleep=time.sleep):
         op = broker.price(opt["instrument_key"]) or fill
         reason = engine.exit_reason(side, fp, op, decision, prem_stop, prem_target, now().strftime("%H:%M"), cfg)
         exit_px = op
-        status(f"crude {fp:,.1f}, option ₹{op:.2f} (bought ₹{fill:.2f}, stop ₹{prem_stop}, target ₹{prem_target}), "
+        status(f"{cfg.underlying.lower()} {fp:,.1f}, option ₹{op:.2f} (bought ₹{fill:.2f}, stop ₹{prem_stop}, target ₹{prem_target}), "
                f"P&L ~₹{(op - fill) * units * cfg.lots:,.0f}")
     if not reason.startswith("stop (exchange)"):
         exit_px = broker.sell_now(opt["instrument_key"], cfg.lots, stop_id, exit_px or fill)

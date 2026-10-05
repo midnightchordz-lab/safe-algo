@@ -99,6 +99,21 @@ NEWS_FOCUS = {
 }
 
 
+def rules_text(cfg, atr):
+    """The bot's hard limits in points, so the AI's plans are built to fit them (the code still
+    checks every plan; this only stops near-misses like a 95-point stop against a 97 minimum)."""
+    if not atr:
+        return ""
+    lo, hi = cfg.stop_atr_range
+    return (f"HARD LIMITS the bot enforces on every plan (main and conditional); a plan outside them is "
+            f"discarded, so build yours inside them, with some margin: stop distance from entry between "
+            f"{lo * atr:.1f} and {hi * atr:.1f} points; target distance at least {cfg.min_reward_risk} x the "
+            f"stop distance; entry trigger within {0.5 * atr:.1f} points of the current price; win chance "
+            f"x reward - loss chance x risk at least {cfg.min_edge} x risk; confidence at least "
+            f"{cfg.min_confidence}. (ATR, the typical daily move, is {atr:.1f}.) Never stretch a level just to "
+            f"fit: if no plan makes sense inside these limits, set that side to 0.\n\n")
+
+
 class Analyst:
     def __init__(self, cfg, client=None):
         self.cfg = cfg
@@ -139,6 +154,7 @@ class Analyst:
             f"TRADING futures contract: {trade_future} at {trade_future_price}.\n"
             f"Price data (from the most liquid exchange, may differ slightly in level):\n"
             f"{json.dumps(tech, indent=1)}\n\nNews brief:\n{news or '(no news available)'}\n\n"
+            + rules_text(self.cfg, (tech or {}).get("atr14"))
             + "Return your decision.")
         try:
             r = self._create(

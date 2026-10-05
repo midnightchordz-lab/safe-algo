@@ -130,6 +130,18 @@ class AITests(unittest.TestCase):
         d, _ = self.analyst(FakeResp("", "refusal")).decide("CRUDEOIL", {}, "F", 8800, "", "now")
         self.assertEqual(d["direction"], "NO_TRADE")
 
+    def test_prompt_states_the_hard_limits_in_points(self):
+        from commodity.ai import Analyst
+        seen = {}
+
+        def create(**k):
+            seen["prompt"] = k["messages"][0]["content"]
+            return FakeResp(json.dumps(DOWN))
+        client = types.SimpleNamespace(messages=types.SimpleNamespace(create=create))
+        Analyst(CommodityConfig(), client=client).decide("CRUDEOIL", {"atr14": 389}, "F", 8687, "", "now")
+        self.assertIn("stop distance from entry between 97.2 and 583.5 points", seen["prompt"])
+        self.assertIn("at least 1.5 x the stop distance", seen["prompt"])
+
     def test_garbage_is_no_trade(self):
         d, _ = self.analyst(FakeResp("I think it goes down")).decide("CRUDEOIL", {}, "F", 8800, "", "now")
         self.assertEqual(d["direction"], "NO_TRADE")
@@ -276,7 +288,7 @@ class BotTests(unittest.TestCase):
         self.assertTrue(any("Armed until 21:30: CALL above 8858 (stop 8750, target 9030, 66%) / "
                             "PUT below 8770 (stop 8880, target 8600, 70%)" in n for n in notes))
         self.assertTrue(any("no plan triggered by 21:30" in n for n in notes))
-        beats = [l for l in logs.output if "crude 8,800.0, armed:" in l]
+        beats = [l for l in logs.output if "crudeoil 8,800.0, armed:" in l]
         self.assertEqual(len(beats), 36)  # 18:30-21:30: one line every 5 minutes, not every 30 seconds
 
     def test_single_poke_does_not_trigger(self):
