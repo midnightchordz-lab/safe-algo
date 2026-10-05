@@ -44,6 +44,20 @@ class RuleTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("edge 43 pts < 0.5", why)
 
+    def test_expiry_at_least_one_day_away(self):
+        from commodity import market
+        self.assertEqual(CommodityConfig().min_days_to_expiry, 1)
+        with mock.patch.dict(os.environ, {"COMMODITY_MIN_DAYS_TO_EXPIRY": "0"}):
+            self.assertEqual(CommodityConfig().min_days_to_expiry, 1)   # never the expiry day itself
+        now = datetime(2026, 10, 5, 18, 30, tzinfo=IST)
+
+        def opt(day, k):
+            return {"instrument_type": "PE", "strike_price": k, "trading_symbol": f"PE {day} {k}",
+                    "expiry": int(datetime(2026, 10, day, 23, 30, tzinfo=IST).timestamp() * 1000)}
+        rows = [opt(5, 8800), opt(8, 8800), opt(19, 8800)]
+        self.assertEqual(market.pick_option(rows, "DOWN", 8790, now, 1)["trading_symbol"], "PE 8 8800")
+        self.assertEqual(market.pick_option(rows, "DOWN", 8790, now, 5)["trading_symbol"], "PE 19 8800")
+
     def test_thresholds_cannot_be_loosened(self):
         with mock.patch.dict(os.environ, {"COMMODITY_MIN_CONFIDENCE": "20", "COMMODITY_MIN_EDGE": "0"}):
             cfg = CommodityConfig()

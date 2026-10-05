@@ -42,7 +42,7 @@ class CommodityConfig:
     min_reward_risk: float = 1.5           # target at least 1.5x the stop distance (futures points)
     stop_atr_range: tuple = (0.25, 1.5)    # stop distance must be 0.25-1.5x the typical daily move
     max_premium_loss_pct: float = 0.40     # option stop never more than 40% below the fill
-    min_days_to_expiry: int = 5
+    min_days_to_expiry: int = env("COMMODITY_MIN_DAYS_TO_EXPIRY", 1, int)  # clamped to >= 1: never expiry day
     max_spread_pct: float = 0.03           # skip contracts whose bid/ask gap is over 3% of the price
 
     # --- Guardrails ---
@@ -78,5 +78,6 @@ class CommodityConfig:
         self.log_file = self.log_file or os.path.join(HERE, f"commodity{tag}.log")
         self.halt_file = self.halt_file or os.path.join(HERE, f"COMMODITY{tag.upper()}_HALTED")
         self.min_confidence = max(50, int(self.min_confidence))
+        self.min_days_to_expiry = max(1, int(self.min_days_to_expiry))
         self.min_edge = max(0.25, float(self.min_edge))
         self.lots = 1
