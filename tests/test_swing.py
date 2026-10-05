@@ -124,3 +124,37 @@ class GuardrailTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScreenTests(unittest.TestCase):
+    """The daily screen line and the replay tool (logging only, no trading effect)."""
+
+    def bars(self, closes):
+        from upstox_api import Candle
+        return [Candle(f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}", c, c * 1.01, c * 0.99, c, 0)
+                for i, c in enumerate(closes)]
+
+    def test_funnel_counts_and_signal_match_the_rule(self):
+        from swing.config import SwingConfig
+        from swing.indicators import compute
+        from swing.strategy import diagnose, screen_summary, signal
+        cfg = SwingConfig()
+        up = [100 + i * 0.5 for i in range(260)]
+        dip = up[:-2] + [up[-3] - 6, up[-3] + 1]          # dips below the 20-day, then closes back above
+        flat = [100.0] * 260                              # not in an uptrend
+        inds = {"A": compute(self.bars(dip)), "B": compute(self.bars(flat)), "C": compute(self.bars(up))}
+        idx = {s: 259 for s in inds}
+        self.assertEqual(diagnose(inds["B"], 259, cfg), "not in uptrend")
+        self.assertEqual(diagnose(inds["C"], 259, cfg), "no dip")
+        stage_a = diagnose(inds["A"], 259, cfg)
+        self.assertEqual(stage_a == "SIGNAL", signal(inds["A"], 259, cfg) is not None)
+        line, watch = screen_summary(inds, idx, cfg)
+        self.assertIn("3 stocks | 2 in uptrend", line)
+
+    def test_replay_lists_each_day(self):
+        from swing.config import SwingConfig
+        from swing.replay import replay
+        up = [100 + i * 0.5 for i in range(260)]
+        rows = replay({"A": self.bars(up), "NIFTYBEES": self.bars(up)}, SwingConfig(), 5)
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(all("signal(s)" in line for _, line, _, _ in rows))

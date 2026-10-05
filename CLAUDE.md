@@ -15,7 +15,7 @@ Automated Upstox trading bots for one owner. This repository holds only this pro
 | Path | What it is | Mode |
 |---|---|---|
 | `bot.py`, `engine.py`, `risk.py`, `strategy.py`, `config.py` | Long-term bot: NIFTYBEES + GOLDBEES 50/50, rebalanced; soft floor ₹8,500 (freeze), hard floor ₹7,000 (sell) | LIVE |
-| `swing/` | Swing bot: Nifty 50 pullbacks, 3:1 reward/risk, broker-held GTT stops | PAPER |
+| `swing/` | Swing bot: Nifty 50 pullbacks, 3:1 reward/risk, broker-held GTT stops; logs a daily screen funnel + watch list; `swing/replay.py` replays the screen over recent days (read-only) | PAPER |
 | `commodity/` | Commodity option bots, one engine run twice: CRUDEOIL (COMMODITY_* settings, commodity_*.json) and NATURALGAS (NATGAS_* settings, commodity_naturalgas_*.json), each with its own live switch, premium cap and loss limit. Price data + Claude news read, hard rules, 1 lot, intraday; on no-trade it arms Claude's pre-committed call/put plans and executes one when its level holds for two checks | owner's choice (`install_mac.py --commodity-live`) |
 | `commodity/score.py` | Replays every logged commodity plan against real 15-minute futures bars: win rate, avg win/loss, profit factor (read-only) | n/a |
 | `tools/mcx_ticket.py` | Manual commodity option ticket; every order needs the owner to type YES | manual |

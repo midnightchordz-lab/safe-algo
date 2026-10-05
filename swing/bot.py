@@ -19,6 +19,7 @@ from swing.config import SwingConfig
 from swing.engine import (check_exit, close_position, end_of_day, equity, floor_action,
                           new_state, open_position, pick_entries)
 from swing.indicators import compute
+from swing.strategy import screen_summary
 from upstox_api import Upstox, UpstoxError, resolve_instrument_keys
 
 log = logging.getLogger("swing")
@@ -123,6 +124,11 @@ def main():
     idx = {s: len(hist[s]) - 1 for s, k in keys.items() if k in live_bars and len(hist[s]) > 210}
     prices = {s: hist[s][-1].close for s in hist if hist[s]}
     inds = {s: compute(hist[s]) for s in idx}
+    line, watch = screen_summary(inds, idx, cfg)
+    log.info(line)
+    if watch:
+        log.info("Watch list (uptrend, now below the 20-day; a close back above would trigger): %s",
+                 ", ".join(watch[:10]))
 
     # 1) Exits: target / stop (held by Upstox in live mode) and the 20-day time stop.
     held = api.holdings() if cfg.live else {}
